@@ -52,16 +52,17 @@ while flag != None:
 # 建立漫畫資料夾
 dir = input("漫畫名稱:")
 if os.path.exists(dir):
-    print ("資料夾已存在!\n")
+    print ("資料夾已存在，開始下一步\n")
 else:
     os.mkdir(dir)
     print ("資料夾創建成功\n")
 
 # 漫畫代碼，relife 的為 1
 # titleNo = '1'
-print('說明:\n以 relife為例，網址是：http://www.comico.com.tw/1/ \n網址最後為 1 即為此漫畫之漫畫代碼')
+print('說明:\n以 relife 為例，網址是：http://www.comico.com.tw/1/ \n網址最後為 1 即為此漫畫之漫畫代碼\n')
 titleNo = int(input('漫畫代碼：'))
-print('說明:\n以第193話為例，網址是：http://www.comico.com.tw/1/193/ \n網址最後的數字 193 即為這話的網頁代碼\n如果只下載一話，則 開始與結束 的網頁代碼都填這一話的即可\n')
+
+print('\n說明:\n以第 186 話為例，網址是：http://www.comico.com.tw/1/193/ \n網址最後的數字 193 即為這話的網頁代碼\n如果只下載一話，則 開始與結束 的網頁代碼都填這一話的即可\n')
 b = int(input('開始網頁代碼:'))
 e = int(input('結束網頁代碼:'))
 while e < b:
@@ -132,7 +133,7 @@ for n in range(b, e + 1):
     string = string.replace("',\r\n\t'", "'\r\n\t")
     string = string.split("'\r\n\t")
     url.extend(string[1:-1])
-    print('已獲取 《%s》 的下載連結' % title)
+    print('\n已獲取 《%s》 的下載連結' % title)
 
     # 建立資料夾
     imgdir = './%s/%s' % (dir, title)
