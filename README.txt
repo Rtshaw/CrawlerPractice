@@ -1,2 +1,3 @@
-comico downloader
-用来下载comico漫画里的付费章节
+﻿comico downloader
+
+用來下載comico漫畫裡的付費章節
