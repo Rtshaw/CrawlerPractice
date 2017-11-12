@@ -48,15 +48,24 @@ while flag != None:
             os.remove('login.txt')
         print('登入失敗，請重試\n')
 
+
+# 建立漫畫資料夾
+dir = input("漫畫名稱:")
+if os.path.exists(dir):
+    print ("資料夾已存在!\n")
+else:
+    os.mkdir(dir)
+    print ("資料夾創建成功\n")
+
 # 漫畫代碼，relife 的為 1
 # titleNo = '1'
-print ('以 relife為例，網址是：http://www.comico.com.tw/1/\n 網址最後為 1 即為此漫畫之漫畫代碼')
+print('說明:\n以 relife為例，網址是：http://www.comico.com.tw/1/ \n網址最後為 1 即為此漫畫之漫畫代碼')
 titleNo = int(input('漫畫代碼：'))
-print('說明：\n以第186話為例，網址是：http://www.comico.com.tw/1/193/ \n網址最後的數字 193 即為這話的網頁代碼\n如果只下載一話，則 開始與結束 的網頁代碼都填這一話的即可\n')
+print('說明:\n以第193話為例，網址是：http://www.comico.com.tw/1/193/ \n網址最後的數字 193 即為這話的網頁代碼\n如果只下載一話，則 開始與結束 的網頁代碼都填這一話的即可\n')
 b = int(input('開始網頁代碼:'))
 e = int(input('結束網頁代碼:'))
 while e < b:
-    print('輸入錯誤！\n')
+    print('輸入錯誤!\n')
     b = int(input('開始網頁:'))
     e = int(input('結束網頁:'))
 
@@ -126,12 +135,12 @@ for n in range(b, e + 1):
     print('已獲取 《%s》 的下載連結' % title)
 
     # 建立資料夾
-    imgdir = './%s' % title
+    imgdir = './%s/%s' % (dir, title)
     if os.path.isdir(imgdir) == False:
         os.mkdir(imgdir)
 
     # 建立壓縮文件
-    zfile = zipfile.ZipFile("%s.zip" % title, "w", zipfile.zlib.DEFLATED)
+    zfile = zipfile.ZipFile("%s/%s.zip" % (dir, title), "w", zipfile.zlib.DEFLATED)
 
     imgpath = []
 
@@ -159,7 +168,7 @@ for n in range(b, e + 1):
         new_im.paste(fromImage, (0, y_offset))
         fromImage.close()
         y_offset = y_offset + 2000
-    new_im.save('%s.jpg' % title)
+    new_im.save('%s/%s.jpg' % (dir, title))
     print('已拼接長圖\n')
 print('所有下載任務已經完成')
 input('按任意鍵退出')
