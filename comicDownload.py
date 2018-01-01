@@ -82,10 +82,10 @@ def login(loginhash, username, password):
 # 建立資料夾
 def mkdir(comicName):
     if os.path.exists(comicName):
-        print("資料夾已存在，開始下一步\n")
+        print("\n%s 資料夾已存在，開始下一步\n" %comicName)
     else:
         os.mkdir(comicName)
-        print("資料夾創建成功\n")
+        print("\n%s 資料夾創建成功\n" %comicName)
 
 # 下載漫畫
 def downloadcomic():
@@ -105,41 +105,49 @@ def downloadcomic():
     titleName = soup.find_all(class_= "s xst")
     
     # 要抓取漫畫的網頁代碼
-    titleNo = str(input('網頁代碼：'))
-    r = s.get("https://bbs.yamibo.com/thread-%s-1-1.html" % titleNo)
-    soup = BeautifulSoup(r.text, "lxml")
-    titleName = soup.find('title')
-    # print(titleName.get_text())
-    
-    # 建立漫畫資料夾
-    dirname = r.text.split("<meta name=\"description\"")[0].split("<meta name=\"keywords\" content=\"")[-1].split("\" />")[0]
-    # print(dirname)
-    mkdir(dirname)
-    
-    # 下載圖片
-    img = r.text.split("<ignore_js_op>")
-    # print(img)
-    for drink in img:
-        line = drink.split("/>")[0]
-        picname = drink.split("</p>")[0].split("</strong>")[0]
-        # print(line)
-        # 獲取圖片連結
-        if(("file" in line) and ("class=\"xs0\"" in picname)):
-            img_file = line.split("file=\"")[-1].split("\"")[0]
-            img_url = "https://bbs.yamibo.com/"+img_file
-            # print(img_url)
-            
-            # print(filename)
-            if((".jpeg" in img_url) or (".jpg" in img_url) or (".JPG" in img_url) or ("png" in img_url)):
-                img_res = s.get(img_url)
-                img = img_res.content
-                filename = picname.split("strong>")[-1]
-                imgdir = ("%s/" %dirname)
-                filepath = imgdir+filename
-                fileout = open(filepath, "wb")
-                fileout.write(img)
-                print("%s, Download..." %filename)
-    print("Done\n")
+    comicnum = int(input("要下載幾個頁面："))
+    titleNo = []
+    for time in range(comicnum):
+        titletmp = input("第 "+str(time+1)+" 個網頁代碼：")
+        titleNo.append(titletmp)
+        # print(titleNo[time])
+
+    for down in range(comicnum):
+        print(titleNo)
+        r = s.get("https://bbs.yamibo.com/thread-%s-1-1.html" % titleNo.pop())
+        soup = BeautifulSoup(r.text, "lxml")
+        titleName = soup.find('title')
+        # print(titleName.get_text())
+
+        # 建立漫畫資料夾
+        dirname = r.text.split("<meta name=\"description\"")[0].split("<meta name=\"keywords\" content=\"")[-1].split("\" />")[0]
+        # print(dirname)
+        mkdir(dirname)
+
+        # 下載圖片
+        img = r.text.split("<ignore_js_op>")
+        # print(img)
+        for drink in img:
+            line = drink.split("/>")[0]
+            picname = drink.split("</p>")[0].split("</strong>")[0]
+            # print(line)
+            # 獲取圖片連結
+            if(("file" in line) and ("class=\"xs0\"" in picname)):
+                img_file = line.split("file=\"")[-1].split("\"")[0]
+                img_url = "https://bbs.yamibo.com/"+img_file
+                # print(img_url)
+                
+                # print(filename)
+                if((".jpeg" in img_url) or (".jpg" in img_url) or (".JPG" in img_url) or ("png" in img_url)):
+                    img_res = s.get(img_url)
+                    img = img_res.content
+                    filename = picname.split("strong>")[-1]
+                    imgdir = ("%s/" %dirname)
+                    filepath = imgdir+filename
+                    fileout = open(filepath, "wb")
+                    fileout.write(img)
+                    print("%s, ...OK" %filename)
+        print("\n%s Done\n" %dirname)
 
     '''
     # 印出第一頁標題
