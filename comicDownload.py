@@ -14,7 +14,6 @@ s = requests.Session()
 login_url = 'https://bbs.yamibo.com/member.php?mod=logging&action=login&infloat=yes&handlekey=login&inajax=1&ajaxtarget=fwin_content_login'
 comic_url = 'https://bbs.yamibo.com/forum-30-1.html'
 
-
 # 獲取登入loginhash
 def get_login_window():
     url = login_url
@@ -33,7 +32,6 @@ def get_login_window():
     # print("loginhash = " + loginhash)
     return(loginhash)
 
-
 loginhash = get_login_window()
 
 # 登入並保存帳號
@@ -47,7 +45,6 @@ else:
     with open('account.txt', 'w') as f:
         f.write('%s\n%s' %(username, password))
 print("\n開始嘗試登入\n")
-
 
 # 模擬登入
 def login(loginhash, username, password):
@@ -106,6 +103,7 @@ def downloadcomic():
     
     # 要抓取漫畫的網頁代碼
     comicnum = int(input("要下載幾個頁面："))
+    print("\n說明：\n以 https://bbs.yamibo.com/thread-475959-1-1.html 為例，475959 為網頁代碼。\n")
     titleNo = []
     for time in range(comicnum):
         titletmp = input("第 "+str(time+1)+" 個網頁代碼：")
@@ -113,12 +111,12 @@ def downloadcomic():
         # print(titleNo[time])
 
     for down in range(comicnum):
-        print(titleNo)
+        print("\n排隊佇列："+str(titleNo))
         r = s.get("https://bbs.yamibo.com/thread-%s-1-1.html" % titleNo.pop())
         soup = BeautifulSoup(r.text, "lxml")
         titleName = soup.find('title')
         # print(titleName.get_text())
-
+        
         # 建立漫畫資料夾
         dirname = r.text.split("<meta name=\"description\"")[0].split("<meta name=\"keywords\" content=\"")[-1].split("\" />")[0]
         # print(dirname)
@@ -131,12 +129,12 @@ def downloadcomic():
             line = drink.split("/>")[0]
             picname = drink.split("</p>")[0].split("</strong>")[0]
             # print(line)
+            
             # 獲取圖片連結
             if(("file" in line) and ("class=\"xs0\"" in picname)):
                 img_file = line.split("file=\"")[-1].split("\"")[0]
                 img_url = "https://bbs.yamibo.com/"+img_file
                 # print(img_url)
-                
                 # print(filename)
                 if((".jpeg" in img_url) or (".jpg" in img_url) or (".JPG" in img_url) or ("png" in img_url)):
                     img_res = s.get(img_url)
@@ -147,7 +145,7 @@ def downloadcomic():
                     fileout = open(filepath, "wb")
                     fileout.write(img)
                     print("%s, ...OK" %filename)
-        print("\n%s Done\n" %dirname)
+        print("\n%s Done" %dirname)
 
     '''
     # 印出第一頁標題
@@ -165,5 +163,4 @@ def downloadcomic():
     '''
 
 downloadcomic()
-
 
