@@ -197,3 +197,5 @@ def downloadcomic():
 
 downloadcomic()
 
+print('\n所有下載任務已完成')
+input('按任意鍵退出')
