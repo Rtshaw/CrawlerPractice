@@ -8,7 +8,7 @@ import zipfile
 from PIL import Image
 import img2pdf
 
-print('comico漫畫下載\n作者：ishadows\n')
+print('comico漫畫下載')
 s = requests.Session()
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64)  AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36',
@@ -52,20 +52,26 @@ r = s.get('http://www.comico.com.tw/consume/coin/publish.nhn', data = {'paymentC
 coinUseToken = r.text[27:-3]
 
 
-# 建立漫畫資料夾
-dir = input("漫畫名稱:")
-if os.path.exists(dir):
-    print ("資料夾已存在，開始下一步\n")
-else:
-    os.mkdir(dir)
-    print ("資料夾創建成功\n")
-
-
-
 # 漫畫代碼，relife 的為 1
 # titleNo = '1'
 print('說明:\n以 relife 為例，網址是：http://www.comico.com.tw/1/ \n網址最後為 1 即為此漫畫之漫畫代碼\n')
 titleNo = int(input('漫畫代碼：'))
+
+
+# 建立漫畫資料夾
+
+url = "http://www.comico.com.tw/%s" % titleNo
+r = s.get(url)
+soup = BeautifulSoup(r.text, 'lxml')
+comicName = soup.find('title').prettify('utf-8').decode('utf-8')
+comicName = comicName.split("|")[0].split(" ")[1]
+dir = comicName
+if os.path.exists(dir):
+    print ("\n資料夾已存在，開始下一步")
+else:
+    os.mkdir(dir)
+    print ("資料夾創建成功\n")
+
 
 print('\n說明:\n以第 186 話為例，網址是：http://www.comico.com.tw/1/193/ \n網址最後的數字 193 即為這話的網頁代碼\n如果只下載一話，則 開始與結束 的網頁代碼都填這一話的即可\n')
 b = int(input('開始網頁代碼:'))
@@ -185,3 +191,4 @@ for n in range(b, e + 1):
 
 print('已下載完成')
 input('按任意鍵退出')
+
