@@ -96,6 +96,7 @@ for n in range(b, e + 1):
     title = title_div.string
     # 去除最後的空格
     title.rstrip()
+    title = title.split(' ')[0]
     # 避免半角問號導致資料夾無法命名
     title.replace('?', '？')
     title.replace('!', '！')
