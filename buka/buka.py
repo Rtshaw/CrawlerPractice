@@ -8,27 +8,37 @@ from lxml import etree
 
 def get_comic(url):
     r = requests.get(url)
+    episode = url.split('view/')[1].split('.')[0]
     
     try:
         html = etree.HTML(r.content)
-        # 章節 待寫 尚未完成
-        chapter = html.xpath('//div[@class="manga-episodes"]/select/option/@title')
-        # for chap in chapter:
-            #p rint(chap)           
+        # 漫畫名
+        chapter = html.xpath('//div[@class="manga-episodes"]/select/option/@value')
+        chap_name = html.xpath('//div[@class="manga-episodes"]/select/option/@title')
+        for index, chap in enumerate(chapter, 1):
+            if episode == chap:
+                chapname = chap_name[index]
+                
         # 標題
         title = html.xpath('//head/title/text()')[0]
-        # 建立標題資料夾
-        if not os.path.exists('./%s' % title):
-            os.mkdir('./%s' % title)
-            print('\n創建 "%s" 資料夾完成，進行下一步\n' % title)
+        # 建立資料夾
+        if not os.path.exists('./%s' % chapname):
+            os.mkdir('./%s' % chapname)
+            print('\n創建 "%s" 資料夾完成，進行下一步' % chapname)
+            if not os.path.exists('./%s/%s' % (chapname, title)):
+                os.mkdir('./%s/%s' % (chapname, title))
+                print('創建 "%s" 資料夾完成，進行下一步\n' % title)
+            else:
+                print('"%s" 資料夾已存在，進行下一步\n' % title)
         else:
-            print('"%s" 資料夾已存在，進行下一步\n' % title)
+            print('\n"%s" 資料夾已存在，進行下一步\n' % chapname)
         # print(title)
+        
         # 圖片網址
         imgone = html.xpath('//div[@class="manga-c"]/img/@src')[0]
         img_r = requests.get(imgone)
         time.sleep(1)
-        with open('./%s/0.jpg' % title, mode='wb') as fp:
+        with open('./%s/%s/0.jpg' % (chapname, title), mode='wb') as fp:
             fp.write(img_r.content)
         print('0.jpg, ...OK')
         img_url = html.xpath('//div[@class="manga-c"]/img/@data-original')
@@ -37,7 +47,7 @@ def get_comic(url):
             img_r = requests.get(imgurl)
             time.sleep(1)
             
-            with open('./%s/%s.jpg' % (title, index), mode='wb') as fp:
+            with open('./%s/%s/%s.jpg' % (chapname, title, index), mode='wb') as fp:
                 fp.write(img_r.content)
             print('%s.jpg, ...OK' % index)
         
