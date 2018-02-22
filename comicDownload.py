@@ -5,6 +5,7 @@ import re
 import sys
 import os
 import zipfile
+import time
 from bs4 import BeautifulSoup
 from PIL import Image
 
@@ -105,10 +106,10 @@ def downloadcomic():
     comicnum = int(input("要下載幾個頁面："))
     print("\n說明：\n以 https://bbs.yamibo.com/thread-475959-1-1.html 為例，475959 為網頁代碼。\n")
     titleNo = []
-    for time in range(comicnum):
-        titletmp = input("第 "+str(time+1)+" 個網頁代碼：")
+    for t in range(comicnum):
+        titletmp = input("第 "+str(t+1)+" 個網頁代碼：")
         titleNo.append(titletmp)
-        # print(titleNo[time])
+        # print(titleNo[t])
 
     for down in range(comicnum):
         # print("\n排隊佇列："+str(titleNo))
@@ -124,57 +125,59 @@ def downloadcomic():
         mkdir(dirname)
                
         # 另外一種放在img標籤裡的抓法
-        img_img = soup.find_all('img', 'zoom', lazyloadthumb='1')
+        img_img = soup.find_all('img', 'zoom')
+        # print(img_img)
         img_img_list = []
         
         for l in img_img:
             img_img_list.append(str(l)) # 轉成list
-            # print(img_img_list)
         
         # 抓圖片連結並下載
-        name = 1
+        imgname = 1
         for i in img_img_list:
             img_url = i.split(" ")[4].split("\"")[1]
-            # print(img_url)
-            # print(type(img_img))
-            name = str(name)
+            imgname = str(imgname)
             
             if((".jpeg" in img_url) or (".jpg" in img_url) or (".JPG" in img_url) or ("png" in img_url)):
                     img_res = s.get(img_url)
+                    time.sleep(1) # 防止請求過快
                     img = img_res.content
-                    filename = name+".jpg"
+                    filename = imgname+".jpg"
                     imgdir = ("%s/" %dirname)
                     filepath = imgdir+filename
                     fileout = open(filepath, "wb")
                     fileout.write(img)
                     print("%s, ...OK" %filename)
             
-            name = int(name)
-            name = name+1 
+            imgname = int(imgname)
+            imgname = imgname+1 
         
         # 下載圖片
-        img = r.text.split("<ignore_js_op>")  # 大部分的漫畫可以從這個標籤爬到    
+        img = r.text.split("<ignore_js_op>")  # 大部分的漫畫可以從這個標籤爬到   
+        imgname = 1
         for drink in img:
             line = drink.split("/>")[0]
             picname = drink.split("</p>")[0].split("</strong>")[0]
-            # print(line)
-            # print(type(img))
-       
+
             # 獲取圖片連結
             if(("file" in line) and ("class=\"xs0\"" in picname)):
                 img_file = line.split("file=\"")[-1].split("\"")[0]
                 img_url = "https://bbs.yamibo.com/"+img_file
+                imgname = str(imgname)
                 # print(img_url)
-                # print(filename)
                 if((".jpeg" in img_url) or (".jpg" in img_url) or (".JPG" in img_url) or ("png" in img_url)):
                     img_res = s.get(img_url)
+                    time.sleep(1) # 防止請求過快
                     img = img_res.content
-                    filename = picname.split("strong>")[-1]
+                    filename = imgname+".jpg"
                     imgdir = ("%s/" %dirname)
                     filepath = imgdir+filename
                     fileout = open(filepath, "wb")
                     fileout.write(img)
                     print("%s, ...OK" %filename)
+                    
+                imgname = int(imgname)
+                imgname = imgname+1
                                  
        
         print("\n%s Done" %dirname)
