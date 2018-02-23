@@ -3,10 +3,9 @@ import queue  # model為 pyinstaller
 import lxml
 import requests
 import os
-from bs4 import BeautifulSoup
 import zipfile
 from PIL import Image
-import img2pdf
+from bs4 import BeautifulSoup
 
 print('comico漫畫下載')
 s = requests.Session()
@@ -95,8 +94,7 @@ for n in range(b, e + 1):
     title_div = soup.find(class_="comico-global-header__page-title-ellipsis")
     title = title_div.string
     # 去除最後的空格
-    title.rstrip()
-    title = title.split(' ')[0]
+    title = title.rstrip()
     # 避免半角問號導致資料夾無法命名
     title.replace('?', '？')
     title.replace('!', '！')
