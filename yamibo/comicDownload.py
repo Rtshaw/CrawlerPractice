@@ -135,7 +135,7 @@ def downloadcomic():
         # 抓圖片連結並下載
         imgname = 1
         for i in img_img_list:
-            img_url = i.split(" ")[4].split("\"")[1]
+            img_url = "https://bbs.yamibo.com/"+i.split(" ")[4].split("\"")[1]
             imgname = str(imgname)
             
             if((".jpeg" in img_url) or (".jpg" in img_url) or (".JPG" in img_url) or ("png" in img_url)):
