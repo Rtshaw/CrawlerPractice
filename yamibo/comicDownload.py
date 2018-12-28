@@ -6,14 +6,18 @@ import sys
 import os
 import zipfile
 import time
+import json
 from bs4 import BeautifulSoup
 from PIL import Image
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 print('百合會漫畫下載\n作者：rtshaw\n')
 s = requests.Session()
 
 login_url = 'https://bbs.yamibo.com/member.php?mod=logging&action=login&infloat=yes&handlekey=login&inajax=1&ajaxtarget=fwin_content_login'
 comic_url = 'https://bbs.yamibo.com/forum-30-1.html'
+base_url = 'https://bbs.yamibo.com/forum.php?'
 
 # 獲取登入loginhash
 def get_login_window():
@@ -75,7 +79,21 @@ def login(loginhash, username, password):
     s.headers.clear()
     s.headers.update(headers)
     r = s.post(url, data)
-    # print(r.text)
+    #print(r.text)
+    
+def get_page(tid, viewpid, cp, ajaxtarget):
+    parameters = {
+        'mod':'viewthread',
+        'threadindex': 'yes',
+        'tid': tid,
+        'viewpid': viewpid,
+        'cp': cp,
+        'inajax': '1',
+        'ajaxtarget': ajaxtarget
+    }
+    url = base_url + urlencode(parameters)
+    return url
+    
 
 # 建立資料夾
 def mkdir(comicName):
@@ -83,8 +101,9 @@ def mkdir(comicName):
         print("\n%s 資料夾已存在，開始下一步\n" %comicName)
     else:
         os.mkdir(comicName)
-        print("\n%s 資料夾創建成功\n" %comicName)
-
+        print("\n%s 資料夾創建成功\n" %comicName)        
+        
+        
 # 下載漫畫
 def downloadcomic():
     login(loginhash, username, password)
@@ -99,7 +118,7 @@ def downloadcomic():
         print("登入失敗，再試一次\n")
         sys.exit(0)
     
-    soup = BeautifulSoup(r.text, "lxml")
+    soup = BeautifulSoup(r.text, "lxml")    
     titleName = soup.find_all(class_= "s xst")
 
     # 要抓取漫畫的網頁代碼
@@ -108,9 +127,9 @@ def downloadcomic():
     titleNo = []
     for t in range(comicnum):
         titletmp = input("第 "+str(t+1)+" 個網頁代碼：")
+        tid = titletmp
         titleNo.append(titletmp)
         # print(titleNo[t])
-
     for down in range(comicnum):
         # print("\n排隊佇列："+str(titleNo))
         url = "https://bbs.yamibo.com/thread-%s-1-1.html" % titleNo.pop()
@@ -122,7 +141,40 @@ def downloadcomic():
         # 建立漫畫資料夾
         dirname = r.text.split("<meta name=\"description\"")[0].split("<meta name=\"keywords\" content=\"")[-1].split("\" />")[0]
         # print(dirname)
+        # 避免特殊字元導致資料夾創建失敗
+        dirname = dirname.replace(':', '')
+        dirname = dirname.replace('/', '.')
         mkdir(dirname)
+     
+        v = soup.find_all("div", {'id':re.compile(r'(\w{4})(_)(\d+)')})   
+        # 轉成list :為了做split
+        vlist = []
+        for x in v:
+            vlist.append(str(x))
+        ajaxtarget = vlist[0].split("<div id=\"")[1].split("\"")[0]
+        viewpid = vlist[0].split("aimgcount")[-1].split("[")[1].split("]")[0]
+        # 目錄
+        cplist = []
+        c = soup.find_all("a", {'page':re.compile(r'\d')})
+        for x in c:
+            cplist.append(str(x))
+        print("   目錄\n\n 0 沒有目錄")
+        count = 1
+        for x in cplist:
+            tbc = x.split(">")[1].split("<")[0]
+            print(" "+str(count)+" "+tbc)
+            count += 1
+        print("")
+        if cplist:
+            cp = int(input("請選擇要載入的頁面："))
+        else:
+            cp = 0
+        print("")
+        if cp!=0:
+            url = get_page(tid, viewpid, cp, ajaxtarget)
+            r = s.get(url)
+            soup = BeautifulSoup(r.text, "lxml")
+        
                
         # 另外一種放在img標籤裡的抓法
         img_img = soup.find_all('img', 'zoom')
@@ -135,8 +187,9 @@ def downloadcomic():
         # 抓圖片連結並下載
         imgname = 1
         for i in img_img_list:
-            img_url = "https://bbs.yamibo.com/"+i.split(" ")[4].split("\"")[1]
+            img_url = i.split(" ")[4].split("\"")[1]
             imgname = str(imgname)
+            # print(img_url)
             
             if((".jpeg" in img_url) or (".jpg" in img_url) or (".JPG" in img_url) or ("png" in img_url)):
                     img_res = s.get(img_url)
@@ -158,7 +211,7 @@ def downloadcomic():
         for drink in img:
             line = drink.split("/>")[0]
             picname = drink.split("</p>")[0].split("</strong>")[0]
-
+            # print(line)
             # 獲取圖片連結
             if(("file" in line) and ("class=\"xs0\"" in picname)):
                 img_file = line.split("file=\"")[-1].split("\"")[0]
