@@ -1,14 +1,14 @@
 {
-    "status": "已完成包裹成功取件",
-    "status_time": "2019/05/27 15:46:00",
+    "status": "包裹進行配送中",
+    "status_time": "2019/06/29 21:17:29",
     "search_code": "查詢代碼：",
-    "product_number": "G32737408719",
+    "product_number": "H11169036125",
     "product_info": "取貨資訊",
     "store_name_title": "取貨門市",
-    "store_name": "狀元",
+    "store_name": "潭豐",
     "store_address_title": "取貨門市地址",
-    "store_address": "南投縣竹山鎮大明路500號",
+    "store_address": "台中市潭子區崇德路四段250之1號",
     "deadline_title": "取貨截止日",
-    "deadline": "2019-06-01",
-    "service_type": "取貨付款"
+    "deadline": "2019-07-07",
+    "service_type": "取貨不付款"
 }

@@ -3,3 +3,15 @@
 
 #
 .vscode
+
+#
+/t-cat/information.json
+
+#
+/eservice/information.json
+
+# 未完成
+/postserv/postserv.py
+/postserv/jcaptcha.jpg
+/taiwanbank
+

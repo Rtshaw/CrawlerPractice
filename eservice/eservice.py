@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# dolist:驗證碼影像辨識
 
 import re
 import lxml
@@ -24,7 +25,12 @@ def search():
     s.headers.update(headers)
     # r = s.post(url, data=data)
     r = s.get(url)
+    soup = BeautifulSoup(r.text, 'lxml')
     # print(r.text)
+    vs = soup.find('input', {'id':'__VIEWSTATE'}).get('value')
+    # print(viewstate)
+    return vs
+
 
 
 def get_captcha():
@@ -41,7 +47,7 @@ def get_captcha():
         w.write(r.content)
 
 
-def start_search(productNumber, captcha):
+def start_search(viewstate, productNumber, captcha):
     url = searchUrl
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
@@ -49,7 +55,7 @@ def start_search(productNumber, captcha):
     data = {
         '__EVENTTARGET': 'submit',
         '__EVENTARGUMENT': '',
-        '__VIEWSTATE': 'NtItcSNcm6DA0Xa+EtU3IZQrSA+hMpbzjgHZmiK6UHqHreRX46laTBnybjv3G1wJ2L84Z5/BwKPvQCDhuV9qsMj/Y8NrME8HRcKAoq2U1sAIAdKeQ/S/9N+Z24d5tyQeeVw1bHoATqcNz3kM6eFc+DitV9HcxQ1CygG1TuNqQznElEFDMQrjlkQ3bwnACwVuXvThtK9mnAVXnJokv4n7fqKD/L2SoVUtzP6OfhJ7yyy3V7BAwt0dhjjqXPYzT/Owql4JDwtZgJtYhIcABljCnSyyGWUtxLGuCiB/vE6Membw85jP8SMKBB4kMXVE84clUdPv9zohXO1NcRguUOl2UUa8wpc=',
+        '__VIEWSTATE': viewstate,
         '__VIEWSTATEGENERATOR': '3E7313DB',
         'txtProductNum': productNumber,
         'tbChkCode': captcha,
@@ -61,7 +67,7 @@ def start_search(productNumber, captcha):
     # 因為爬下來的編碼格式為 ISO-8859-1 所以先編碼後解碼
     # print(r.encoding)
     # r = r.text.encode('ISO-8859-1').decode('utf8')
-    print(r.text)
+    # print(r.text)
 
     soup = BeautifulSoup(r.text, 'lxml')
     # status = soup.select('div.m_news')
@@ -124,11 +130,11 @@ def start_search(productNumber, captcha):
 
 
 if __name__ == '__main__':
-    search()
+    viewstate = search()
     get_captcha()
     productNumber = input('取/寄件編碼：')
     captcha = input('驗證碼：')
-    start_search(productNumber, captcha)
+    start_search(viewstate, productNumber, captcha)
     
 # G56852849894
 # G32737408719
