@@ -3,6 +3,9 @@
 
 #
 .vscode
+*.spec
+dist
+build
 
 #
 /t-cat/information.json
