@@ -4,29 +4,29 @@ import json
 import requests
 from bs4 import BeautifulSoup
 
-
-s = requests.Session()
+session = requests.Session()
 search_url = 'https://www.t-cat.com.tw/Inquire/International.aspx'
 
-
 def search():
-		url = search_url
-		headers = {
+    url = search_url
+    headers = {
         'Upgrade-Insecure-Requests': '1',
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
     }
-		s.headers.clear()
-		s.headers.update(headers)
+    session.headers.clear()
+    session.headers.update(headers)
     # r = s.post(url, data=data)
-		r = s.get(url)
-		# print(r.text)
-		soup = BeautifulSoup(r.text, 'lxml')
-		vs = soup.find('input', {'id':'__VIEWSTATE'}).get('value')
-		ev = soup.find('input', {'id':'__EVENTVALIDATION'}).get('value')
+    response = session.get(url)
+    # print(r.text)
+    soup = BeautifulSoup(response.text, 'lxml')
+    viewState = soup.find('input', {'id': '__VIEWSTATE'}).get('value')
+    eventValidation = soup.find(
+        'input', {'id': '__EVENTVALIDATION'}).get('value')
 
-		return vs, ev
+    return viewState, eventValidation
 
-def start_serch(viewstate, eventvalidation, package_number):
+
+def start_serch(_viewState, _eventValidation, _packageNnumber):
     url = search_url
     headers = {
         'Upgrade-Insecure-Requests': '1',
@@ -36,19 +36,19 @@ def start_serch(viewstate, eventvalidation, package_number):
     data = {
         '__EVENTTARGET': 'ctl00$ContentPlaceHolder1$btnQuery',
         '__EVENTARGUMENT': '',
-        '__VIEWSTATE': viewstate,
+        '__VIEWSTATE': _viewState,
         '__VIEWSTATEGENERATOR': '0FD02B3E',
-        '__EVENTVALIDATION': eventvalidation,
+        '__EVENTVALIDATION': _eventValidation,
         'q': '站內搜尋',
-        'ctl00$ContentPlaceHolder1$txtReqNo': package_number,
+        'ctl00$ContentPlaceHolder1$txtReqNo': _packageNnumber,
     }
 
-    s.headers.clear()
-    s.headers.update(headers)
+    session.headers.clear()
+    session.headers.update(headers)
     # r = s.get(url)
-    r = s.post(url, data, headers)
+    response = session.post(url, data, headers)
     # print(r.text)
-    soup = BeautifulSoup(r.text, 'lxml')
+    soup = BeautifulSoup(response.text, 'lxml')
 
     table = soup.find('table', {'class': 'tablelist'},
                       id='ContentPlaceHolder1_resultTable')
@@ -62,19 +62,24 @@ def start_serch(viewstate, eventvalidation, package_number):
         rows.append([td.text.replace('\n', '').replace('\xa0', '')
                      for td in tr.find_all('td')])
     rows[:5]
-    # print(trs)
-    # print(rows)
-    # print(columns)
     json_file = {}
+
     for c, r in zip(columns, rows[0]):
         json_file.update({c: r})
+    
+    return json_file
     # print(json_file)
-    with open('./information.json', 'w', encoding='utf-8') as f:
-        f.write(json.dumps(json_file, ensure_ascii=False))
-        print('已寫入 json檔')
+    # with open('./information.json', 'w', encoding='utf-8') as f:
+    #     f.write(json.dumps(json_file, ensure_ascii=False))
+    #     print('已寫入 json檔')
 
 
 if __name__ == '__main__':
-	viewstate, eventvalidation = search()
-	package_number = input('國際宅急便貨物追蹤號碼：')
-	start_serch(viewstate, eventvalidation, package_number)
+    viewState, eventValidation = search()
+    packageNnumber = input('國際宅急便貨物追蹤號碼：')
+    result = start_serch(viewState, eventValidation, packageNnumber)
+
+    if result['國際宅急便包裹查詢號碼'] == f'{packageNnumber}':
+        print(result['貨態'])
+    else:
+        print('目前尚無料資料')
