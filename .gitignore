@@ -17,3 +17,28 @@
 
 #
 test.py
+yamibo_test.py
+crack.py
+
+# 
+__pycache__
+
+# another file
+*.js
+*.jpg
+*.png
+
+# 隱私資訊
+config.ini
+account.txt
+
+# virtual env
+crawler
+
+# 開發中
+advance_yamibo.py
+
+# 圖片
+Comic
+image
+log
