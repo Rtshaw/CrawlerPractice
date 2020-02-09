@@ -81,12 +81,18 @@ def mkdir(comic_title):
         print(f'漫畫資料夾 與 {comic_title} 資料夾，創建完成。')
 
 
-def get_comic_image(index, image_url, comic_title):
+def get_comic_image(index, image_url, comic_title, mod=1):
     """取得漫畫的圖片檔
     :param index: 索引（圖片名稱）
     :param Image_url: 圖片網址
+    :param comic_title: 漫畫名
+    :param mod: 抓取模式
     """
-    url = f'{base_url}{image_url}'
+    if mod == 1:
+        url = f'{base_url}{image_url}'
+    elif mod == 2:
+        url = image_url
+
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
     }
@@ -111,17 +117,24 @@ def download_comic(comic_number):
     response = session.get(url, headers=headers)
     soup = BeautifulSoup(response.text, 'lxml')
     comic_title = soup.find('span', id='thread_subject').text
-    comic_title.replace(':', '').replace(
-        '/', '.').replace('|', '.')  # 避免資料夾無法使用之特殊字元
+    comic_title = re.sub('[\\/:*?"<>|]', ' ', comic_title)  # 避免資料夾無法使用之特殊字元
 
     mkdir(comic_title)
 
     # ignore標籤
     ignore_js_ops = soup.find_all('ignore_js_op')
 
-    for i, ignore_tag in enumerate(ignore_js_ops):
-        image = ignore_tag.find('img')['file']
-        get_comic_image(i, image, comic_title)
+    if len(ignore_js_ops) > 0:
+        for i, ignore_tag in enumerate(ignore_js_ops):
+            image = ignore_tag.find('img')['file']
+            get_comic_image(i, image, comic_title)
+    else:
+        image_area = soup.find('div', class_='t_fsz')
+        imgs = image_area.find_all('img')
+        for i, img_tag in enumerate(imgs):
+            image = img_tag['file']
+            print(image)
+            get_comic_image(i, image, comic_title, 2)
 
 
 def thread():
