@@ -6,6 +6,7 @@
 *.spec
 dist
 build
+env
 
 #
 /t-cat/information.json

@@ -130,10 +130,9 @@ def download_comic(comic_number):
             get_comic_image(i, image, comic_title)
     else:
         image_area = soup.find('div', class_='t_fsz')
-        imgs = image_area.find_all('img')
+        imgs = image_area.find_all('img', class_='zoom')
         for i, img_tag in enumerate(imgs):
             image = img_tag['file']
-            print(image)
             get_comic_image(i, image, comic_title, 2)
 
 
