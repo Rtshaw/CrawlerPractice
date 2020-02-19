@@ -15,7 +15,7 @@ import solve_captchas
 
 session = requests.Session()
 
-best_model = os.getcwd() + '/best_model.hdf5'
+best_model = os.getcwd() + '/best_model.h5'
 model_labels = os.getcwd() + '/model_labels.dat'
 
 
@@ -35,23 +35,23 @@ def search(tracking_number):
     check_code_url = soup.find(id='ImgVCode')['src']
     check_code_url = 'https://eservice.7-11.com.tw/e-tracking/' + check_code_url
 
-    get_check_code(check_code_url)
+    check_code = get_check_code(check_code_url)
 
     # start search
-    # data = {
-    #     '__LASTFOCUS': '',
-    #     '__EVENTTARGET': '',
-    #     '__EVENTARGUMENT': '',
-    #     '__VIEWSTATE': __VIEWSTATE,
-    #     '__VIEWSTATEGENERATOR': __VIEWSTATEGENERATOR,
-    #     'txtProductNum': tracking_number,
-    #     'tbChkCode': check_code,
-    #     'aaa': '',
-    #     'txtIMGName': '',
-    #     'txtPage': '1',
-    # }
-    # response = session.post(url, headesr=headers, data=data)
-    # print(response.text)
+    data = {
+        '__LASTFOCUS': '',
+        '__EVENTTARGET': '',
+        '__EVENTARGUMENT': '',
+        '__VIEWSTATE': __VIEWSTATE,
+        '__VIEWSTATEGENERATOR': __VIEWSTATEGENERATOR,
+        'txtProductNum': tracking_number,
+        'tbChkCode': check_code,
+        'aaa': '',
+        'txtIMGName': '',
+        'txtPage': '1',
+    }
+    response = session.post(url, headers=headers, data=data)
+    print(response.text)
 
 
 def get_check_code(check_code_url):
@@ -62,11 +62,12 @@ def get_check_code(check_code_url):
     response = session.get(url, headers=headers)
     with open('captcha.jpg', 'wb') as w:
         w.write(response.content)
+    
+    # 圖片降噪
+    solve_captchas.noise_remove(os.getcwd()+'/captcha.jpg', 4)
 
-    captcha = solve_captchas.solve_captcha_with_models(
-        os.getcwd()+'/captcha.jpg', best_model, model_labels)
-
-    print(captcha)
+    captcha = solve_captchas.solve_captcha_with_models(os.getcwd()+'/captcha.jpg', best_model)
+    return captcha
 
 
 # def start_search(viewstate, productNumber, captcha):
