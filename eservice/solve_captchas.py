@@ -7,76 +7,88 @@ import pickle
 from helpers import resize_to_fit
 from keras.models import load_model
 
-
-def solve_captcha_with_models(captcha_path, model_path, model_labels_path):
-    """預測驗證碼
-    :param captcha_path: 驗證碼路徑
-    :param model_path: 模型路徑
-    :param model_labels_path: Label路徑
+def noise_remove(image_path, threshold):
+    """
+    Remove noise
+    :param image_path: Image's location
+    :param threshold: Threshold
     """
 
-    with open(model_labels_path, "rb") as f:
-        lb = pickle.load(f)
+    def calculate_noise_count(image_object, width, height):
+        """        
+        Calculate the number of areas that are not white
+        :param image_object: Image Object
+        :param width: Width
+        :param height: Height
+        """
 
-    Model = load_model(model_path)
+        COUNT = 0
+        WIDTH, HEIGHT = image_object.shape
 
-    Image = cv2.imread(captcha_path)
-    Image = cv2.cvtColor(Image, cv2.COLOR_BGR2GRAY)
+        for __Width_ in [width-1, width, width+1]:
+            for __Height_ in [height-1, height, height+1]:
+                if __Width_ > WIDTH-1:
+                    continue
+                if __Height_ > HEIGHT-1:
+                    continue
+                if __Width_ == WIDTH and __Height_ == HEIGHT:
+                    continue
+                if image_object[__Width_, __Height_] < 185:
+                    COUNT += 1
+        return COUNT
 
-    # 二值化
-    _, Image = cv2.threshold(Image, 185, 255, cv2.THRESH_BINARY)
+    image = cv2.imread(image_path, 1)
 
-    Image = cv2.copyMakeBorder(Image, 20, 20, 20, 20, cv2.BORDER_REPLICATE)
+    # 灰度
+    image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    w, h = image_gray.shape
+    for _w in range(w):
+        for _h in range(h):
+            if _w == 0 or _h == 0:
+                image_gray[_w, _h] = 255
+                continue
+            # Calculate Pixel value < 255
+            pixel = image_gray[_w, _h]
+            if pixel == 255:
+                continue
 
-    Thresh = cv2.threshold(
-        Image, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
-    Contours = cv2.findContours(
-        Thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    Contours = Contours[0]
+            if calculate_noise_count(image_gray, _w, _h) < threshold:
+                image_gray[_w, _h] = 255
 
-    LetterImageRegions = []
+    _, image_gray = cv2.threshold(image_gray, 185, 255, cv2.THRESH_BINARY)
 
-    for Contour in Contours:
-        (x, y, w, h) = cv2.boundingRect(Contour)
+    cv2.imwrite(image_path, image_gray)
+    return image_gray
 
-        if w / h > 1.25:
-            half_width = int(w / 2)
-            LetterImageRegions.append((x, y, half_width, h))
-            LetterImageRegions.append((x + half_width, y, half_width, h))
-        else:
-            LetterImageRegions.append((x, y, w, h))
 
-    LetterImageRegions = sorted(LetterImageRegions, key=lambda x: x[0])
+def solve_captcha_with_models(captcha_path, model_path, number_length=4):
+    """"預測驗證碼
+    :param captcha_path: 驗證碼路徑
+    :param model_path: 模型路徑
+    :param number_length: 驗證碼長度
+    """
 
-    Output = cv2.merge([Image] * 3)
-    Predictions = []
+    train_model = load_model(model_path)
+    BatchSize = 1
 
-    for LetterBoundingBox in LetterImageRegions:
-        x, y, w, h = LetterBoundingBox
+    image = cv2.imread(captcha_path, 1)
+    height, width = image.shape[:2]
+    n_length, n_class = number_length, 10
 
-        LetterImage = Image[y - 2:y + h + 2, x - 2:x + w + 2]
+    X = numpy.zeros((BatchSize, height, width, 3), dtype=numpy.uint8)
 
-        LetterImage = resize_to_fit(LetterImage, 20, 20)
+    for i in range(BatchSize):
+        XTest = cv2.imread(captcha_path, 1)
+        X[i] = XTest
 
-        if LetterImage is False:
-            return False
+    YPredict = train_model.predict(X)
+    YPredict = numpy.argmax(YPredict, axis=2)
 
-        LetterImage = numpy.expand_dims(LetterImage, axis=2)
-        LetterImage = numpy.expand_dims(LetterImage, axis=0)
+    Captcha = ''
 
-        Prediction = Model.predict(LetterImage)
+    for i in range(BatchSize):
+        print('驗證碼：', end='')
+        print(''.join(map(str, YPredict[:, i].tolist())))
+        Captcha = ''.join(map(str, YPredict[:, i].tolist()))
 
-        Letter = lb.inverse_transform(Prediction)[0]
-        Predictions.append(Letter)
-
-        cv2.rectangle(Output, (x - 2, y - 2),
-                      (x + w + 4, y + h + 4), (0, 255, 0), 1)
-        cv2.putText(Output, Letter, (x - 5, y - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
-
-    CaptchaText = "".join(Predictions)
-    print("驗證碼：{}".format(CaptchaText))
-
-    print(len(CaptchaText))
-
-    return CaptchaText
+    return Captcha
