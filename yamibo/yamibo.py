@@ -25,7 +25,8 @@ def get_hash():
 
     url = member_url
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) \
+            AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
     }
     session.headers.clear()  # 清空原haeaders
     session.headers.update(headers)  # 更新headers
@@ -49,9 +50,11 @@ def login(hash_, username, password):
     :param username: 登入帳號
     :param password: 登入密碼
     """
-    url = f'https://bbs.yamibo.com/member.php?mod=logging&action=login&loginsubmit=yes&frommessage&loginhash={hash_["loginhash"]}&inajax=1'
+    url = f'https://bbs.yamibo.com/member.php?\
+        mod=logging&action=login&loginsubmit=yes&frommessage&loginhash={hash_["loginhash"]}&inajax=1'
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) \
+            AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
     }
     data = {
         'formhash': hash_['formhash'],
@@ -65,6 +68,8 @@ def login(hash_, username, password):
     response = session.post(url, headers=headers, data=data)
     if re.search('欢迎您回来', response.text):
         print(f'{username} 登入成功')
+    else:
+        print('登入失敗')
 
 
 def mkdir(comic_title):
@@ -94,7 +99,8 @@ def get_comic_image(index, image_url, comic_title, mod=1):
         url = image_url
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) \
+            AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
     }
     response = session.get(url, headers=headers)
     time.sleep(0.2)
@@ -112,7 +118,8 @@ def download_comic(comic_number):
     """
     url = f'https://bbs.yamibo.com/thread-{comic_number}-1-1.html'
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) \
+            AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
     }
     response = session.get(url, headers=headers)
     soup = BeautifulSoup(response.text, 'lxml')
@@ -131,9 +138,15 @@ def download_comic(comic_number):
     else:
         image_area = soup.find('div', class_='t_fsz')
         imgs = image_area.find_all('img', class_='zoom')
-        for i, img_tag in enumerate(imgs):
-            image = img_tag['file']
-            get_comic_image(i, image, comic_title, 2)
+        if len(imgs) > 0:
+            for i, img_tag in enumerate(imgs):
+                image = img_tag['file']
+                get_comic_image(i, image, comic_title, 2)
+        else:
+            imgs = image_area.find_all('img')
+            for i, img_tag in enumerate(imgs):
+                image = img_tag['src']
+                get_comic_image(i, image, comic_title, 2)
 
 
 def thread():
