@@ -128,26 +128,19 @@ def download_comic(comic_number):
 
     mkdir(comic_title)
 
-    # ignore標籤
-    ignore_js_ops = soup.find_all('ignore_js_op')
-
-    if len(ignore_js_ops) > 0:
-        for i, ignore_tag in enumerate(ignore_js_ops):
-            image = ignore_tag.find('img')['file']
-            get_comic_image(i, image, comic_title)
+    image_area = soup.find('div', class_='t_fsz')
+    imgs = image_area.find_all('img', class_='zoom')
+    if len(imgs)>0:
+        for i, img_tag in enumerate(imgs):
+            image = img_tag['file']
+            if re.search('^data', image):
+                get_comic_image(i, image, comic_title)
+            else:
+                get_comic_image(i, image, comic_title, 2)
     else:
-        image_area = soup.find('div', class_='t_fsz')
-        imgs = image_area.find_all('img', class_='zoom')
-        if len(imgs) > 0:
-            for i, img_tag in enumerate(imgs):
-                image = img_tag['file']
-                get_comic_image(i, image, comic_title, 2)
-        else:
-            imgs = image_area.find_all('img')
-            for i, img_tag in enumerate(imgs):
-                image = img_tag['src']
-                get_comic_image(i, image, comic_title, 2)
-
+        imgs = image_area.find_all('img')
+        for i, img_tag in enumerate(imgs):
+            image = img_tag['src']
 
 def thread():
     """多線程"""
