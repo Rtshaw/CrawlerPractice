@@ -6,18 +6,22 @@ __author__ = 'rtshaw'
 __date__ = '2020/02/08'
 __version__ = '0.0.1'
 
-import requests
 import configparser
-from bs4 import BeautifulSoup
 import re
 import os
 import time
 import threading
 
+import requests
+from bs4 import BeautifulSoup
+from opencc import OpenCC
+
 session = requests.Session()
 
 member_url = 'https://bbs.yamibo.com/member.php?mod=logging&action=login&infloat=yes&frommessage&inajax=1&ajaxtarget=messagelogin'
 base_url = 'https://bbs.yamibo.com/'
+
+s2t = OpenCC('s2t') # 簡體字轉繁體字
 
 
 def get_hash():
@@ -125,6 +129,12 @@ def download_comic(comic_number):
     soup = BeautifulSoup(response.text, 'lxml')
     comic_title = soup.find('span', id='thread_subject').text
     comic_title = re.sub('[\\/:*?"<>|]', ' ', comic_title)  # 避免資料夾無法使用之特殊字元
+    comic_title = comic_title.replace('(', '（').replace(')', '）') # 改為全形
+    
+    try:
+        comic_title.encode('big5hkscs')
+    except:
+        comic_title = s2t.convert(comic_title) # 轉為繁體標題
 
     mkdir(comic_title)
 
