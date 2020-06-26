@@ -14,14 +14,14 @@ import threading
 
 import requests
 from bs4 import BeautifulSoup
-from opencc import OpenCC
+from opencc.opencc import opencc
 
 session = requests.Session()
 
 member_url = 'https://bbs.yamibo.com/member.php?mod=logging&action=login&infloat=yes&frommessage&inajax=1&ajaxtarget=messagelogin'
 base_url = 'https://bbs.yamibo.com/'
 
-s2t = OpenCC('s2t') # 簡體字轉繁體字
+s2t = opencc.OpenCC('s2t') # 簡體字轉繁體字
 
 
 def get_hash():
@@ -151,6 +151,7 @@ def download_comic(comic_number):
         imgs = image_area.find_all('img')
         for i, img_tag in enumerate(imgs):
             image = img_tag['src']
+            get_comic_image(i, image, comic_title, 2)
 
 def thread():
     """多線程"""
@@ -158,13 +159,13 @@ def thread():
     comic_pages = int(input('要下載幾個頁面？'))
     print("\n說明：\n以 https://bbs.yamibo.com/thread-475959-1-1.html 為例，475959 為網頁代碼。\n")
 
-    comic_list = list()
+    comic_list = []
 
     for comic in range(comic_pages):
         comic_num = input(f'第 {comic+1} 個網頁代碼：')
         comic_list.append(comic_num)
 
-    threads = list()
+    threads = []
     for i, comic in enumerate(comic_list):
         threads.append(threading.Thread(target=download_comic, args=(comic,)))
         threads[i].start()

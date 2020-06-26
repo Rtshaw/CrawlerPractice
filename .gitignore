@@ -23,6 +23,7 @@ env
 test.py
 yamibo_test.py
 crack.py
+opencc
 
 # 
 __pycache__
