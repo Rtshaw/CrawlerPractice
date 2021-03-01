@@ -36,6 +36,7 @@ __pycache__
 # 隱私資訊
 config.ini
 account.txt
+login.txt
 
 # virtual env
 crawler
