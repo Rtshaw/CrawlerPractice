@@ -9,13 +9,11 @@ import configparser
 
 # selenium-part
 from selenium import webdriver
-from selenium.webdriver import ActionChains
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.action_chains import ActionChains
 
 print(os.path)
 class Ruten():
@@ -30,7 +28,9 @@ class Ruten():
 
     # config 設定
     self.config = configparser.ConfigParser()
-    self.config.read('D:/Project/Side Project/CrawlerPractice/ruten/dist/config.ini')
+    self.config.read('config.ini')
+
+    self.card_type = 'MASTER'
 
   def quit_driver(self):
     """ 關閉瀏覽器 """
@@ -69,14 +69,16 @@ class Ruten():
   def go_to_fee_center(self, driver):
     """ 前往計費中心 """
     try:
-      mybid_element = driver.find_element_by_xpath('//div[@class="rt-header-mybid rt-header-dropdown-wrap"]')
-      # print(mybid_locator)
-      
-      hover = ActionChains(driver).move_to_element(mybid_element)
-      hover.perform()
-      
-      fee_center_locator = (By.XPATH, '//a[@href="https://point.ruten.com.tw/account/fee.php"]')
-      self.webdriver_click(driver, fee_center_locator)
+      driver.get('https://point.ruten.com.tw/account/fee.php')
+      unpaid_dollar = driver.find_element_by_xpath('//div[@class="fee-unit fee-unit-total"]//div[@class="fee-dollar"]').text
+      unpaid_dollar = int(unpaid_dollar.split(' ')[0])
+
+      if unpaid_dollar < 10:
+        self.card_type = 'VISA'
+      elif unpaid_dollar > 100:
+        self.card_type = 'JCB'
+      else:
+        self.card_type = 'MASTER'
 
     except Exception as e:
       print(f'go_to_fee_center error: {e}')
@@ -115,26 +117,27 @@ class Ruten():
 
       # 信用卡發行商
       crd_type_element = driver.find_element_by_id('crd_type')
+
       for option in crd_type_element.find_elements_by_tag_name('option'):
-        if option.text == 'JCB':
+        if option.text == self.card_type:
           option.click()
           break
 
-      self.webdriver_wait_send_keys(driver, crd_n1, self.config['Ruten']['card_n1'])
-      self.webdriver_wait_send_keys(driver, crd_n2, self.config['Ruten']['card_n2'])
-      self.webdriver_wait_send_keys(driver, crd_n3, self.config['Ruten']['card_n3'])
-      self.webdriver_wait_send_keys(driver, crd_n4, self.config['Ruten']['card_n4'])
-      self.webdriver_wait_send_keys(driver, crd_l3, self.config['Ruten']['card_safe'])
+      self.webdriver_wait_send_keys(driver, crd_n1, self.config[f'{self.card_type}']['card_n1'])
+      self.webdriver_wait_send_keys(driver, crd_n2, self.config[f'{self.card_type}']['card_n2'])
+      self.webdriver_wait_send_keys(driver, crd_n3, self.config[f'{self.card_type}']['card_n3'])
+      self.webdriver_wait_send_keys(driver, crd_n4, self.config[f'{self.card_type}']['card_n4'])
+      self.webdriver_wait_send_keys(driver, crd_l3, self.config[f'{self.card_type}']['card_safe'])
       
       crd_dlm_element = driver.find_element_by_id('crd_dlm')
       for option in crd_dlm_element.find_elements_by_tag_name('option'):
-        if option.text == self.config['Ruten']['card_dlm']:
+        if option.text == self.config[f'{self.card_type}']['card_dlm']:
           option.click()
           break
 
       crd_dly_element = driver.find_element_by_id('crd_dly')
       for option in crd_dly_element.find_elements_by_tag_name('option'):
-        if option.text == self.config['Ruten']['card_dly']:
+        if option.text == self.config[f'{self.card_type}']['card_dly']:
           option.click()
           break
 
@@ -151,7 +154,6 @@ class Ruten():
     driver.get(url)
 
     self.login(driver)
-    self.close_ad(driver)
     self.go_to_fee_center(driver)
     self.payfee(driver)
     
