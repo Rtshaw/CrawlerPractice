@@ -19,12 +19,12 @@ print(os.path)
 class Ruten():
   def __init__(self):
     self.chrome_options = Options()
-    self.chrome_options.add_argument('--no-sandbox')
+    self.chrome_options.add_argument('--no-sandbox') # 讓 Chrome在 root權限下執行
     self.chrome_options.add_argument('--disable-dev-shm-usage')
-    self.chrome_options.add_argument('--headless')
+    self.chrome_options.add_argument('--headless') # 不用打開圖形界面
 
     # self.driver = webdriver.Chrome(ChromeDriverManager().install()) # GUI
-    self.driver = webdriver.Chrome(ChromeDriverManager().install(), chrome_options=self.chrome_options)  # no GUI
+    self.driver = webdriver.Chrome(ChromeDriverManager().install(), options=self.chrome_options)  # no GUI
 
     # config 設定
     self.config = configparser.ConfigParser()
@@ -104,6 +104,9 @@ class Ruten():
       crd_n3 = (By.XPATH, '//input[@id="crd_n3"]') # 信用卡3
       crd_n4 = (By.XPATH, '//input[@id="crd_n4"]') # 信用卡4
       crd_l3 = (By.XPATH, '//input[@id="crd_l3"]') # 信用卡安全碼
+      
+      zipcode = (By.XPATH, '//input[@id="zipcode"]') # 3碼郵遞區號
+      zipcode_accurate = (By.XPATH, '//input[@id="zipcode_accurate"]') # 2碼郵遞區號
 
       invoice_type_locator = (By.XPATH, '//input[@data-option="personal"]') # 發票類型
       pay_button_locator = (By.XPATH, '//button[@class="rt-button rt-button-submit rt-button-large"]') # 送出按鈕
@@ -128,8 +131,12 @@ class Ruten():
       self.webdriver_wait_send_keys(driver, crd_n3, self.config[f'{self.card_type}']['card_n3'])
       self.webdriver_wait_send_keys(driver, crd_n4, self.config[f'{self.card_type}']['card_n4'])
       self.webdriver_wait_send_keys(driver, crd_l3, self.config[f'{self.card_type}']['card_safe'])
+
+      self.webdriver_wait_send_keys(driver, zipcode, self.config['Ruten']['zipcode'])
+      self.webdriver_wait_send_keys(driver, zipcode_accurate, self.config['Ruten']['zipcode_accurate'])
       
-      crd_dlm_element = driver.find_element_by_id('crd_dlm')
+      crd_dlm_element = driver.find_element_by_id('crd_dlm') # 信用卡截止日
+      print(crd_dlm_element)
       for option in crd_dlm_element.find_elements_by_tag_name('option'):
         if option.text == self.config[f'{self.card_type}']['card_dlm']:
           option.click()
@@ -140,6 +147,13 @@ class Ruten():
         if option.text == self.config[f'{self.card_type}']['card_dly']:
           option.click()
           break
+      
+      district_element = driver.find_element_by_id('district')  # 鄉鎮市區
+      for option in district_element.find_elements_by_tag_name('option'):
+        if option.text == self.config['Ruten']['district']:
+          option.click()
+          break
+
 
       self.webdriver_click(driver, invoice_type_locator)
       self.webdriver_click(driver, pay_button_locator)
