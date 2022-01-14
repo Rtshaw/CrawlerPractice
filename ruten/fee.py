@@ -15,12 +15,14 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 
-system = platform.system()
-if system != 'Linux':
+try:
   from webdriver_manager.chrome import ChromeDriverManager
+except:
+  pass
 
 class Ruten():
   def __init__(self):
+    system = platform.system()
     if system == 'Linux':
       os.system('pkill chrome')
       os.system("kill $(ps aux | grep webdriver| awk '{print $2}')")
