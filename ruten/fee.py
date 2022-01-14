@@ -5,6 +5,7 @@ __date__ = '2021/06/13'
 __version__ = '0.0.1'
 
 import os
+import platform
 import configparser
 
 # selenium-part
@@ -13,18 +14,27 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 
-print(os.path)
+system = platform.system()
+if system != 'Linux':
+  from webdriver_manager.chrome import ChromeDriverManager
+
 class Ruten():
   def __init__(self):
+    if system == 'Linux':
+      os.system('pkill chrome')
+      os.system("kill $(ps aux | grep webdriver| awk '{print $2}')")
+
     self.chrome_options = Options()
     self.chrome_options.add_argument('--no-sandbox') # 讓 Chrome在 root權限下執行
     self.chrome_options.add_argument('--disable-dev-shm-usage')
     self.chrome_options.add_argument('--headless') # 不用打開圖形界面
 
-    # self.driver = webdriver.Chrome(ChromeDriverManager().install()) # GUI
-    self.driver = webdriver.Chrome(ChromeDriverManager().install(), options=self.chrome_options)  # no GUI
+    # self.driver = webdriver.Chrome(ChromeDriverManager().install()) # no option
+    self.driver = webdriver.Chrome(ChromeDriverManager().install(), options=self.chrome_options)  # has options
+
+    if system == 'Linux':
+      self.driver = webdriver.Chrome('/usr/lib/chromium-browser/chromedriver', options=self.chrome_options)
 
     # config 設定
     self.config = configparser.ConfigParser()
@@ -118,14 +128,6 @@ class Ruten():
       self.webdriver_wait_send_keys(driver, crd_bm, self.config['Ruten']['birth_month'])
       self.webdriver_wait_send_keys(driver, crd_bd, self.config['Ruten']['birth_day'])
 
-      # 信用卡發行商
-      crd_type_element = driver.find_element_by_id('crd_type')
-
-      for option in crd_type_element.find_elements_by_tag_name('option'):
-        if option.text == self.card_type:
-          option.click()
-          break
-
       self.webdriver_wait_send_keys(driver, crd_n1, self.config[f'{self.card_type}']['card_n1'])
       self.webdriver_wait_send_keys(driver, crd_n2, self.config[f'{self.card_type}']['card_n2'])
       self.webdriver_wait_send_keys(driver, crd_n3, self.config[f'{self.card_type}']['card_n3'])
@@ -136,7 +138,6 @@ class Ruten():
       self.webdriver_wait_send_keys(driver, zipcode_accurate, self.config['Ruten']['zipcode_accurate'])
       
       crd_dlm_element = driver.find_element_by_id('crd_dlm') # 信用卡截止日
-      print(crd_dlm_element)
       for option in crd_dlm_element.find_elements_by_tag_name('option'):
         if option.text == self.config[f'{self.card_type}']['card_dlm']:
           option.click()
