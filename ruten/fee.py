@@ -65,7 +65,7 @@ class Ruten():
       password_locator = (By.XPATH, '//input[@name="userpass"]')
       self.webdriver_wait_send_keys(driver, password_locator, self.config['Ruten']['password'])
 
-      login_button_locator = (By.XPATH, '//input[@id="btnLogin"]')
+      login_button_locator = (By.XPATH, '//button[@id="btn-login"]')
       self.webdriver_click(driver, login_button_locator)
     except Exception as e:
       print(f'login error: {e}')
