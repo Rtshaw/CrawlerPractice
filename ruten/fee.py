@@ -7,6 +7,7 @@ __version__ = '0.0.1'
 import os
 import platform
 import configparser
+import time
 
 # selenium-part
 from selenium import webdriver
@@ -59,6 +60,7 @@ class Ruten():
   def login(self, driver):
     """ 登入露天 """
     try:
+      time.sleep(1)
       username_locator = (By.XPATH, '//input[@name="userid"]')
       self.webdriver_wait_send_keys(driver, username_locator, self.config['Ruten']['username'])
 
