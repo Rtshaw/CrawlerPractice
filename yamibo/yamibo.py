@@ -20,6 +20,7 @@ session = requests.Session()
 
 member_url = 'https://bbs.yamibo.com/member.php?mod=logging&action=login&infloat=yes&frommessage&inajax=1&ajaxtarget=messagelogin'
 base_url = 'https://bbs.yamibo.com/'
+ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36'
 
 s2t = opencc.OpenCC('s2t') # 簡體字轉繁體字
 
@@ -29,8 +30,7 @@ def get_hash():
 
     url = member_url
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) \
-            AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
+        'User-Agent': ua,
     }
     session.headers.clear()  # 清空原haeaders
     session.headers.update(headers)  # 更新headers
@@ -57,8 +57,7 @@ def login(hash_, username, password):
     url = f'https://bbs.yamibo.com/member.php?\
         mod=logging&action=login&loginsubmit=yes&frommessage&loginhash={hash_["loginhash"]}&inajax=1'
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) \
-            AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
+        'User-Agent': ua,
     }
     data = {
         'formhash': hash_['formhash'],
@@ -77,7 +76,11 @@ def login(hash_, username, password):
 
 
 def mkdir(comic_title):
-    work_directory = os.getcwd()
+    mode = config['System']['mode']
+    if mode == 'on':
+        work_directory = config['System']['path']
+    else:
+        work_directory = os.getcwd()
 
     if os.path.exists(work_directory+'\\Comic\\'):
         if os.path.exists(work_directory + f'\\Comic\\{comic_title}'):
@@ -103,27 +106,29 @@ def get_comic_image(index, image_url, comic_title, mod=1):
         url = image_url
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) \
-            AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
+        'User-Agent': ua,
     }
     response = session.get(url, headers=headers)
     time.sleep(0.2)
 
-    word_directory = os.getcwd()
+    mode = config['System']['mode']
+    if mode == 'on':
+        work_directory = config['System']['path']
+    else:
+        work_directory = os.getcwd()
 
-    with open(word_directory + f'\\Comic\\{comic_title}\\{index}.jpg', 'wb') as w:
+    with open(work_directory + f'\\Comic\\{comic_title}\\{index}.jpg', 'wb') as w:
         w.write(response.content)
         print(f'{comic_title} . {index}.jpg, ...OK ')
 
 
-def download_comic(comic_number):
+def download_comic(comic_url):
     """下載漫畫
-    :param comic_number: 網頁代碼
+    :param comic_url: 網頁代碼
     """
-    url = f'https://bbs.yamibo.com/thread-{comic_number}-1-1.html'
+    url = comic_url
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) \
-            AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36',
+        'User-Agent': ua,
     }
     response = session.get(url, headers=headers)
     soup = BeautifulSoup(response.text, 'lxml')
@@ -157,12 +162,12 @@ def thread():
     """多線程"""
 
     comic_pages = int(input('要下載幾個頁面？'))
-    print("\n說明：\n以 https://bbs.yamibo.com/thread-475959-1-1.html 為例，475959 為網頁代碼。\n")
+    print("\n說明：\n請複製整段網址。\n")
 
     comic_list = []
 
     for comic in range(comic_pages):
-        comic_num = input(f'第 {comic+1} 個網頁代碼：')
+        comic_num = input(f'第 {comic+1} 個網頁網址：')
         comic_list.append(comic_num)
 
     threads = []
