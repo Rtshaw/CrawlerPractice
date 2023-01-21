@@ -31,7 +31,7 @@ class Ruten():
     self.chrome_options = Options()
     self.chrome_options.add_argument('--no-sandbox') # 讓 Chrome在 root權限下執行
     self.chrome_options.add_argument('--disable-dev-shm-usage')
-    self.chrome_options.add_argument('--headless') # 不用打開圖形界面
+    # self.chrome_options.add_argument('--headless') # 不用打開圖形界面
 
     # self.driver = webdriver.Chrome(ChromeDriverManager().install()) # no option
     self.driver = webdriver.Chrome(ChromeDriverManager().install(), options=self.chrome_options)  # has options
@@ -41,7 +41,7 @@ class Ruten():
 
     # config 設定
     self.config = configparser.ConfigParser()
-    self.config.read('config.ini')
+    self.config.read('config.ini', encoding='utf-8')
 
     self.card_type = 'MASTER'
 
@@ -83,6 +83,7 @@ class Ruten():
   def go_to_fee_center(self, driver):
     """ 前往計費中心 """
     try:
+      time.sleep(1)
       driver.get('https://point.ruten.com.tw/account/fee.php')
       unpaid_dollar = driver.find_element_by_xpath('//div[@class="fee-unit fee-unit-total"]//div[@class="fee-dollar"]').text
       unpaid_dollar = int(unpaid_dollar.split(' ')[0])
@@ -93,6 +94,8 @@ class Ruten():
         self.card_type = 'JCB'
       else:
         self.card_type = 'MASTER'
+
+      self.card_type = 'MASTER' # 強制指定卡別
 
     except Exception as e:
       print(f'go_to_fee_center error: {e}')
@@ -105,8 +108,8 @@ class Ruten():
         self.webdriver_click(driver, credit_card_btn_locator)
       except:
         print('[INFO] 目前沒有費用需要繳交')
-        self.quit_driver()
-        exit()
+        # self.quit_driver()
+        # exit()
 
       crd_rocid = (By.XPATH, '//input[@id="crd_rocid"]') # 身份證
       crd_by = (By.XPATH, '//input[@id="crd_by"]') # 生日年
@@ -125,7 +128,7 @@ class Ruten():
       invoice_type_locator = (By.XPATH, '//input[@data-option="personal"]') # 發票類型
       pay_button_locator = (By.XPATH, '//button[@class="rt-button rt-button-submit rt-button-large"]') # 送出按鈕
       
-
+      time.sleep(1)
       self.webdriver_wait_send_keys(driver, crd_rocid, self.config['Ruten']['userid'])
 
       self.webdriver_wait_send_keys(driver, crd_by, self.config['Ruten']['birth_year'])
@@ -162,10 +165,16 @@ class Ruten():
 
       self.webdriver_click(driver, invoice_type_locator)
       self.webdriver_click(driver, pay_button_locator)
-      self.quit_driver()
+      # self.quit_driver()
 
     except Exception as e:
       print(f'payfee error: {e}')
+    
+  def get_sms(self, driver):
+    """ 取得簡訊 """
+    sms_button_locator = (By.XPATH, '//button[@class="btn btn-block btn-primary mb-2"]')
+    self.webdriver_click(driver, sms_button_locator)
+    
 
   def main(self):
     url = 'https://member.ruten.com.tw/user/login.htm'
@@ -175,6 +184,7 @@ class Ruten():
     self.login(driver)
     self.go_to_fee_center(driver)
     self.payfee(driver)
+    self.get_sms(driver)
     
 if __name__ == "__main__":
   ruten = Ruten()
