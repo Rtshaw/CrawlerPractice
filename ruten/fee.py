@@ -8,13 +8,16 @@ import os
 import platform
 import configparser
 import time
+import json
 
 # selenium-part
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
+# from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
+import undetected_chromedriver as uc
 
 try:
   from webdriver_manager.chrome import ChromeDriverManager
@@ -28,16 +31,20 @@ class Ruten():
       os.system('pkill chrome')
       os.system("kill $(ps aux | grep webdriver| awk '{print $2}')")
 
-    self.chrome_options = Options()
+    self.chrome_options = webdriver.ChromeOptions()
     self.chrome_options.add_argument('--no-sandbox') # 讓 Chrome在 root權限下執行
-    self.chrome_options.add_argument('--disable-dev-shm-usage')
+    # self.chrome_options.add_argument('--disable-dev-shm-usage')
+    self.chrome_options.add_experimental_option("useAutomationExtension", False) # 不顯示 Chrome正受到自動測試軟體控制
+    self.chrome_options.add_experimental_option("excludeSwitches", ['enable-automation'])
+    self.chrome_options.add_experimental_option("detach", True)
     # self.chrome_options.add_argument('--headless') # 不用打開圖形界面
 
     # self.driver = webdriver.Chrome(ChromeDriverManager().install()) # no option
-    self.driver = webdriver.Chrome(ChromeDriverManager().install(), options=self.chrome_options)  # has options
-
-    if system == 'Linux':
-      self.driver = webdriver.Chrome('/usr/lib/chromium-browser/chromedriver', options=self.chrome_options)
+    # self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.chrome_options)  # has options
+    self.driver = uc.Chrome()
+    
+    # if system == 'Linux':
+    #   self.driver = webdriver.Chrome('/usr/lib/chromium-browser/chromedriver', options=self.chrome_options)
 
     # config 設定
     self.config = configparser.ConfigParser()
@@ -57,21 +64,7 @@ class Ruten():
   def webdriver_click(driver, locator):
       WebDriverWait(driver, 10, 5).until(EC.presence_of_element_located(locator)).click()
 
-  def login(self, driver):
-    """ 登入露天 """
-    try:
-      time.sleep(1)
-      username_locator = (By.XPATH, '//input[@name="userid"]')
-      self.webdriver_wait_send_keys(driver, username_locator, self.config['Ruten']['username'])
 
-      password_locator = (By.XPATH, '//input[@name="userpass"]')
-      self.webdriver_wait_send_keys(driver, password_locator, self.config['Ruten']['password'])
-
-      login_button_locator = (By.XPATH, '//button[@id="btn-login"]')
-      self.webdriver_click(driver, login_button_locator)
-    except Exception as e:
-      print(f'login error: {e}')
-    
   def close_ad(self, driver):
     """ 關閉露天廣告 """
     try:
@@ -85,15 +78,15 @@ class Ruten():
     try:
       time.sleep(1)
       driver.get('https://point.ruten.com.tw/account/fee.php')
-      unpaid_dollar = driver.find_element_by_xpath('//div[@class="fee-unit fee-unit-total"]//div[@class="fee-dollar"]').text
-      unpaid_dollar = int(unpaid_dollar.split(' ')[0])
+      # unpaid_dollar = driver.find_element_by_xpath('//div[@class="fee-unit fee-unit-total"]//div[@class="fee-dollar"]').text
+      # unpaid_dollar = int(unpaid_dollar.split(' ')[0])
 
-      if unpaid_dollar < 10:
-        self.card_type = 'VISA'
-      elif unpaid_dollar > 100:
-        self.card_type = 'JCB'
-      else:
-        self.card_type = 'MASTER'
+      # if unpaid_dollar < 10:
+      #   self.card_type = 'VISA'
+      # elif unpaid_dollar > 100:
+      #   self.card_type = 'JCB'
+      # else:
+      #   self.card_type = 'MASTER'
 
       self.card_type = 'MASTER' # 強制指定卡別
 
@@ -144,26 +137,14 @@ class Ruten():
       self.webdriver_wait_send_keys(driver, zipcode, self.config['Ruten']['zipcode'])
       self.webdriver_wait_send_keys(driver, zipcode_accurate, self.config['Ruten']['zipcode_accurate'])
       
-      crd_dlm_element = driver.find_element_by_id('crd_dlm') # 信用卡截止日
-      for option in crd_dlm_element.find_elements_by_tag_name('option'):
-        if option.text == self.config[f'{self.card_type}']['card_dlm']:
-          option.click()
-          break
-
-      crd_dly_element = driver.find_element_by_id('crd_dly')
-      for option in crd_dly_element.find_elements_by_tag_name('option'):
-        if option.text == self.config[f'{self.card_type}']['card_dly']:
-          option.click()
-          break
+      crd_dlm_select = Select(driver.find_element(By.XPATH, '//select[@id="crd_dlm"]'))
+      crd_dlm_select.select_by_value(self.config[self.card_type]['card_dlm'])
       
-      district_element = driver.find_element_by_id('district')  # 鄉鎮市區
-      for option in district_element.find_elements_by_tag_name('option'):
-        if option.text == self.config['Ruten']['district']:
-          option.click()
-          break
-
+      crd_dly_select = Select(driver.find_element(By.XPATH, '//select[@id="crd_dly"]'))
+      crd_dly_select.select_by_value(self.config[self.card_type]['card_dly'])
 
       self.webdriver_click(driver, invoice_type_locator)
+      time.sleep(1)
       self.webdriver_click(driver, pay_button_locator)
       # self.quit_driver()
 
@@ -174,14 +155,31 @@ class Ruten():
     """ 取得簡訊 """
     sms_button_locator = (By.XPATH, '//button[@class="btn btn-block btn-primary mb-2"]')
     self.webdriver_click(driver, sms_button_locator)
+
+    time.sleep(50)
     
 
   def main(self):
     url = 'https://member.ruten.com.tw/user/login.htm'
     driver = self.driver
+    
+    driver.get(url)
+    with open('cookies.json') as f:
+        cookies = json.load(f)
+    
+    for cookie in cookies:
+        # print(cookie)
+        if 'sameSite' in cookie:
+          if cookie['sameSite'] == 'unspecified':
+            cookie['sameSite'] = 'Strict'
+          if cookie['sameSite'] == 'no_restriction':
+            cookie['sameSite'] = 'Strict'
+        driver.add_cookie(cookie)
+    driver.refresh()
+
+    driver.set_window_size(1200, 600)
     driver.get(url)
 
-    self.login(driver)
     self.go_to_fee_center(driver)
     self.payfee(driver)
     self.get_sms(driver)
