@@ -37,6 +37,7 @@ __pycache__
 config.ini
 account.txt
 login.txt
+cookies.json
 
 # virtual env
 crawler
