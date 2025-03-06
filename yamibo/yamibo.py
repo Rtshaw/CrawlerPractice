@@ -2,27 +2,28 @@
 
 # https://bbs.yamibo.com/forum-30-1.html
 
-__author__ = 'rtshaw'
+__author__ = 'casey'
 __date__ = '2020/02/08'
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 
 import configparser
 import re
 import os
 import time
 import threading
+import pickle
 
 import requests
 from bs4 import BeautifulSoup
-from opencc.opencc import opencc
+from opencc import OpenCC
 
 session = requests.Session()
 
 member_url = 'https://bbs.yamibo.com/member.php?mod=logging&action=login&infloat=yes&frommessage&inajax=1&ajaxtarget=messagelogin'
 base_url = 'https://bbs.yamibo.com/'
-ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36'
+ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
 
-s2t = opencc.OpenCC('s2t') # 簡體字轉繁體字
+s2t = OpenCC('s2t') # 簡體字轉繁體字
 
 
 def get_hash():
@@ -71,8 +72,32 @@ def login(hash_, username, password):
     response = session.post(url, headers=headers, data=data)
     if re.search('欢迎您回来', response.text):
         print(f'{username} 登入成功')
+        # 保存 cookie 到文件
+        with open('cookies.pkl', 'wb') as cookie_file:
+            pickle.dump(session.cookies, cookie_file)
     else:
         print('登入失敗')
+
+def load_cookies():
+    """載入之前保存的 cookie"""
+    try:
+        with open('cookies.pkl', 'rb') as cookie_file:
+            cookies = pickle.load(cookie_file)
+            session.cookies.update(cookies)
+            print('載入已有 cookie')
+    except FileNotFoundError:
+        print('没有找到保存的 cookie，需要重新登入')
+
+def check_cookie_validity():
+    """確認 cookie 是否有效"""
+    # 发起一个简单的请求，检查是否登录
+    response = session.get('https://bbs.yamibo.com/forum-30-1.html')
+    if '欢迎您回来' in response.text:
+        print('Cookie 有效')
+        return True
+    else:
+        print('Cookie 無效')
+        return False
 
 
 def mkdir(comic_title):
@@ -100,13 +125,14 @@ def get_comic_image(index, image_url, comic_title, mod=1):
     :param comic_title: 漫畫名
     :param mod: 抓取模式
     """
-    if mod == 1:
-        url = f'{base_url}{image_url}'
-    elif mod == 2:
-        url = image_url
-
+    url = f'{base_url}{image_url}'
     headers = {
-        'User-Agent': ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        "User-Agent": ua,
+        "cookie": "EeqY_2132_saltkey=GLG5EoZG; EeqY_2132_lastvisit=1741140274; EeqY_2132_auth=6d14W%2FeTS%2BiLniPeGlIUhrKJoveqUDY%2BgjgzoHiv9r83pQ%2FBKCEr3RHcpC9wX5gBOUYB6ysF81jPr2lMMBHQ1HCFtpY; EeqY_2132_lastcheckfeed=141815%7C1741143878; EeqY_2132_member_login_status=1; EeqY_2132_visitedfid=30; EeqY_2132_smile=1D1; EeqY_2132_st_t=141815%7C1741144541%7C11e30260b0e4cb12d7c4e8b4670903fb; EeqY_2132_forum_lastvisit=D_30_1741144541; EeqY_2132_zqlj_sign_141815=20250306; EeqY_2132_ulastactivity=76c9SzDVY8YCfoPODPUPhlj9NwSpeT5p5YryY%2FNBfYmOx%2FO4w62d; EeqY_2132_sid=CyByzJ; EeqY_2132_lip=59.126.31.245%2C1741246576; EeqY_2132_home_diymode=1; EeqY_2132_viewid=tid_525800; EeqY_2132_lastact=1741250553%09forum.php%09viewthread; EeqY_2132_st_p=141815%7C1741250553%7C95a3784d5f8737677163c6e6e91590fb",
+        "Referer": "https://bbs.yamibo.com/"
     }
     response = session.get(url, headers=headers)
     time.sleep(0.2)
@@ -128,7 +154,11 @@ def download_comic(comic_url):
     """
     url = comic_url
     headers = {
-        'User-Agent': ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        "User-Agent": ua,
+        "cookie": "EeqY_2132_saltkey=GLG5EoZG; EeqY_2132_lastvisit=1741140274; EeqY_2132_auth=6d14W%2FeTS%2BiLniPeGlIUhrKJoveqUDY%2BgjgzoHiv9r83pQ%2FBKCEr3RHcpC9wX5gBOUYB6ysF81jPr2lMMBHQ1HCFtpY; EeqY_2132_lastcheckfeed=141815%7C1741143878; EeqY_2132_member_login_status=1; EeqY_2132_visitedfid=30; EeqY_2132_smile=1D1; EeqY_2132_st_t=141815%7C1741144541%7C11e30260b0e4cb12d7c4e8b4670903fb; EeqY_2132_forum_lastvisit=D_30_1741144541; EeqY_2132_zqlj_sign_141815=20250306; EeqY_2132_ulastactivity=76c9SzDVY8YCfoPODPUPhlj9NwSpeT5p5YryY%2FNBfYmOx%2FO4w62d; EeqY_2132_sid=CyByzJ; EeqY_2132_lip=59.126.31.245%2C1741246576; EeqY_2132_home_diymode=1; EeqY_2132_viewid=tid_525800; EeqY_2132_lastact=1741250553%09forum.php%09viewthread; EeqY_2132_st_p=141815%7C1741250553%7C95a3784d5f8737677163c6e6e91590fb"
     }
     response = session.get(url, headers=headers)
     soup = BeautifulSoup(response.text, 'lxml')
@@ -182,8 +212,11 @@ if __name__ == "__main__":
     config = configparser.ConfigParser()
     config.read('config.ini')
 
-    hash_ = get_hash()
-    login(hash_, config['User1']['username'], config['User1']['password'])
+    load_cookies()
+    if not check_cookie_validity():
+        hash_ = get_hash()
+        login(hash_, config['User1']['username'], config['User1']['password'])
+
 
     # 抓漫畫
     thread()
