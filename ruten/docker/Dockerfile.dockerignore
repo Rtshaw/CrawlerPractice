@@ -1,0 +1,7 @@
+# Build context is ruten/, but deny everything except relay runtime files.
+*
+!main.py
+!docker/
+docker/*
+!docker/Dockerfile
+!docker/requirements-server.txt

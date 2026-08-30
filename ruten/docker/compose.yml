@@ -1,0 +1,53 @@
+name: ruten-otp
+
+services:
+  relay:
+    image: ruten-otp-relay:1.0.0
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      SMSFORWARDER_SECRET: ${SMSFORWARDER_SECRET:?SMSFORWARDER_SECRET is required}
+      OTP_CONSUMER_TOKEN: ${OTP_CONSUMER_TOKEN:?OTP_CONSUMER_TOKEN is required}
+      OTP_ALLOWED_SENDER_PATTERN: ${OTP_ALLOWED_SENDER_PATTERN:?OTP_ALLOWED_SENDER_PATTERN is required}
+      SMSFORWARDER_MAX_SKEW_SECONDS: ${SMSFORWARDER_MAX_SKEW_SECONDS:-300}
+      OTP_TTL_SECONDS: ${OTP_TTL_SECONDS:-300}
+      OTP_MAX_LONG_POLL_SECONDS: ${OTP_MAX_LONG_POLL_SECONDS:-30}
+      OTP_UPLOAD_TOKEN: ${OTP_UPLOAD_TOKEN:-}
+    expose:
+      - "8000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 100
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik}"
+      - "traefik.http.routers.ruten-otp-http.rule=Host(`${OTP_DOMAIN:-opt.yurishop.xyz}`)"
+      - "traefik.http.routers.ruten-otp-http.entrypoints=${TRAEFIK_HTTP_ENTRYPOINT:-web}"
+      - "traefik.http.routers.ruten-otp-http.middlewares=ruten-otp-https-redirect"
+      - "traefik.http.middlewares.ruten-otp-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.ruten-otp-https-redirect.redirectscheme.permanent=true"
+      - "traefik.http.routers.ruten-otp.rule=Host(`${OTP_DOMAIN:-opt.yurishop.xyz}`)"
+      - "traefik.http.routers.ruten-otp.entrypoints=${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.ruten-otp.tls=true"
+      - "traefik.http.routers.ruten-otp.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.services.ruten-otp.loadbalancer.server.port=8000"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik}

@@ -1,21 +1,11 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+"""Compatibility launcher for the authenticated OTP relay in main.py."""
 
-app = FastAPI()
+import os
 
-class SMS(BaseModel):
-    sender: str
-    receiver: str
-    message: str
+import uvicorn
 
-@app.post("/receive-sms")
-async def receive_sms(sms: SMS):
-    try:
-        with open("sms.txt", "a") as f:
-            f.write(f"{sms.dict()}\n")
-        return {"status": "received", "data": sms}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+from main import app
 
 
-# Run the application using a command like `uvicorn main:app --reload`
+if __name__ == "__main__":
+    uvicorn.run(app, host=os.environ.get("OTP_HOST", "127.0.0.1"), port=int(os.environ.get("OTP_PORT", "8000")))

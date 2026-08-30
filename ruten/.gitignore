@@ -1,0 +1,12 @@
+# Local secrets and runtime state
+.env
+docker/.env
+config.ini
+cookies.json
+.fee.lock
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
