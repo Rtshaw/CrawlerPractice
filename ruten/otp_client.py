@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 import requests
@@ -14,6 +16,15 @@ class OTPRelayError(RuntimeError):
 
 class OTPTimeoutError(TimeoutError):
     """Raised when no fresh OTP arrives before the deadline."""
+
+
+@dataclass(frozen=True)
+class OTPEvent:
+    code: str
+    identifier: Optional[str] = None
+    amount: Optional[Decimal] = None
+    sender: str = ""
+    received_at: float = 0.0
 
 
 class OTPRelayClient:
@@ -58,7 +69,53 @@ class OTPRelayClient:
         return server_time
 
 
-    def wait_for_code(self, *, not_before: float, timeout_seconds: int = 180) -> str:
+    @staticmethod
+    def _parse_event(payload: Any) -> OTPEvent:
+        if not isinstance(payload, dict):
+            raise OTPRelayError("OTP relay returned an invalid response")
+        try:
+            code = str(payload["code"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OTPRelayError("OTP relay returned an invalid response") from exc
+        if not code.isdigit() or not 4 <= len(code) <= 8:
+            raise OTPRelayError("OTP relay returned an invalid code format")
+
+        identifier_value = payload.get("identifier")
+        amount_value = payload.get("amount")
+        if (identifier_value is None) != (amount_value is None):
+            raise OTPRelayError("OTP relay returned incomplete correlation metadata")
+
+        identifier: Optional[str] = None
+        amount: Optional[Decimal] = None
+        if identifier_value is not None:
+            identifier = str(identifier_value).upper()
+            if len(identifier) != 4 or not identifier.isascii() or not identifier.isalpha():
+                raise OTPRelayError("OTP relay returned an invalid webpage identifier")
+            try:
+                amount = Decimal(str(amount_value))
+            except (InvalidOperation, TypeError, ValueError) as exc:
+                raise OTPRelayError("OTP relay returned an invalid transaction amount") from exc
+            if not amount.is_finite() or amount <= 0:
+                raise OTPRelayError("OTP relay returned an invalid transaction amount")
+
+        sender_value = payload.get("sender", "")
+        if not isinstance(sender_value, str):
+            raise OTPRelayError("OTP relay returned an invalid sender")
+        try:
+            received_at = float(payload.get("received_at", 0))
+        except (TypeError, ValueError) as exc:
+            raise OTPRelayError("OTP relay returned an invalid received_at") from exc
+        if received_at < 0:
+            raise OTPRelayError("OTP relay returned an invalid received_at")
+        return OTPEvent(
+            code=code,
+            identifier=identifier,
+            amount=amount,
+            sender=sender_value,
+            received_at=received_at,
+        )
+
+    def wait_for_event(self, *, not_before: float, timeout_seconds: int = 180) -> OTPEvent:
         deadline = time.monotonic() + timeout_seconds
         last_error: Optional[Exception] = None
 
@@ -91,12 +148,17 @@ class OTPRelayClient:
                 continue
 
             try:
-                code = str(response.json()["code"])
-            except (KeyError, TypeError, ValueError) as exc:
+                payload = response.json()
+            except (TypeError, ValueError) as exc:
                 raise OTPRelayError("OTP relay returned an invalid response") from exc
-            if not code.isdigit() or not 4 <= len(code) <= 8:
-                raise OTPRelayError("OTP relay returned an invalid code format")
-            return code
+            return self._parse_event(payload)
 
         detail = f": {last_error}" if last_error else ""
         raise OTPTimeoutError(f"No fresh OTP received within {timeout_seconds} seconds{detail}")
+
+    def wait_for_code(self, *, not_before: float, timeout_seconds: int = 180) -> str:
+        """Backward-compatible code-only API for non-correlated consumers."""
+        return self.wait_for_event(
+            not_before=not_before,
+            timeout_seconds=timeout_seconds,
+        ).code

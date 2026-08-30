@@ -8,6 +8,7 @@ __date__ = "2021/06/13"
 __version__ = "1.0.0"
 
 import configparser
+import hmac
 import json
 import os
 import platform
@@ -15,8 +16,11 @@ import re
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import undetected_chromedriver as uc
 from selenium import webdriver
@@ -32,7 +36,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
 
-from otp_client import OTPRelayClient
+from otp_client import OTPEvent, OTPRelayClient
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if getattr(sys, "frozen", False):
@@ -44,8 +48,16 @@ else:
 
 ROOT_URL = "https://www.ruten.com.tw/"
 FEE_CENTER_URL = "https://point.ruten.com.tw/account/fee.php"
+PAYMENT_FORM_URL_PATH = "/account/paymybill.php"
 WAIT_TIMEOUT_SECONDS = 10
 WAIT_POLL_SECONDS = 0.5
+PAYMENT_FORM_WAIT_SECONDS = 30
+ACS_HOST = "acs.esunbank.com.tw"
+RUTEN_POINT_HOST = "point.ruten.com.tw"
+ACS_AMOUNT_PATTERN = re.compile(
+    r"(?:新台幣\s*)?TWD\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+    re.IGNORECASE,
+)
 
 OTP_INPUT_SELECTORS: Tuple[Tuple[str, str], ...] = (
     (By.CSS_SELECTOR, "input[autocomplete='one-time-code']"),
@@ -93,6 +105,59 @@ Locator = Tuple[str, str]
 
 class PaymentFlowError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class AcsChallenge:
+    amount: Decimal
+    identifiers: FrozenSet[str]
+    transaction_id: str
+
+
+def _is_esun_acs_origin(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.scheme.casefold() == "https" and (
+        parsed.hostname or ""
+    ).casefold() == ACS_HOST
+
+
+def _is_ruten_payment_success(url: str, page_text: str) -> bool:
+    parsed = urlparse(url)
+    return (
+        parsed.scheme.casefold() == "https"
+        and (parsed.hostname or "").casefold() == RUTEN_POINT_HOST
+        and parsed.path.casefold() == "/account/paybillok.php"
+        and "信用卡授權成功" in page_text
+        and "您已經繳費成功" in page_text
+    )
+
+
+def _parse_acs_amount(page_text: str) -> Decimal:
+    amounts = set()
+    for value in ACS_AMOUNT_PATTERN.findall(page_text):
+        try:
+            amount = Decimal(value.replace(",", "")).normalize()
+        except (InvalidOperation, ValueError) as exc:
+            raise PaymentFlowError("玉山 3DS 交易金額格式無效") from exc
+        if not amount.is_finite() or amount <= 0:
+            raise PaymentFlowError("玉山 3DS 交易金額格式無效")
+        amounts.add(amount)
+    if len(amounts) != 1:
+        raise PaymentFlowError("玉山 3DS 交易金額不唯一")
+    return next(iter(amounts))
+
+
+def _normalize_identifiers(values: Iterable[Any]) -> FrozenSet[str]:
+    normalized: List[str] = []
+    for value in values:
+        if not isinstance(value, str) or re.fullmatch(r"[A-Za-z]{4}", value.strip()) is None:
+            raise PaymentFlowError("玉山 3DS 網頁識別碼格式無效")
+        normalized.append(value.strip().upper())
+    if not normalized:
+        raise PaymentFlowError("玉山 3DS 沒有網頁識別碼候選值")
+    if len(set(normalized)) != len(normalized):
+        raise PaymentFlowError("玉山 3DS 網頁識別碼候選值重複")
+    return frozenset(normalized)
 
 
 class Ruten:
@@ -301,6 +366,16 @@ class Ruten:
     def go_to_fee_center(self) -> None:
         self.driver.get(FEE_CENTER_URL)
 
+    def _wait_for_payment_form(self) -> None:
+        try:
+            WebDriverWait(
+                self.driver, PAYMENT_FORM_WAIT_SECONDS, WAIT_POLL_SECONDS
+            ).until(lambda driver: PAYMENT_FORM_URL_PATH in driver.current_url)
+        except TimeoutException as exc:
+            raise PaymentFlowError(
+                "逾時：點擊信用卡付款後未進入露天付款表單"
+            ) from exc
+
     def _first_displayed(self, selectors: Tuple[Locator, ...]) -> Optional[Any]:
         for by, value in selectors:
             try:
@@ -364,6 +439,174 @@ class Ruten:
             return False
         return any(candidate.lower() in source for candidate in candidates)
 
+    @staticmethod
+    def _acs_otp_fields_are_ready(driver: WebDriver) -> bool:
+        return (
+            len(driver.find_elements(By.CSS_SELECTOR, "#acsTransID")) == 1
+            and len(driver.find_elements(By.CSS_SELECTOR, "#challengeValue")) == 1
+            and bool(
+                driver.find_elements(
+                    By.CSS_SELECTOR,
+                    'input[type="radio"][name="identifier"]',
+                )
+            )
+        )
+
+    def _ensure_acs_otp_entry_stage(self) -> None:
+        if self._acs_otp_fields_are_ready(self.driver):
+            return
+
+        methods = [
+            element
+            for element in self.driver.find_elements(
+                By.XPATH,
+                "//*[normalize-space(.)='傳送OTP驗證密碼']",
+            )
+            if element.is_displayed() and element.is_enabled()
+        ]
+        if len(methods) != 1:
+            raise PaymentFlowError("玉山 3DS 的 OTP 驗證方式不唯一")
+        methods[0].click()
+
+        next_buttons = [
+            element
+            for element in self.driver.find_elements(
+                By.XPATH,
+                "//button[normalize-space(.)='下一步']",
+            )
+            if element.is_displayed() and element.is_enabled()
+        ]
+        if len(next_buttons) != 1:
+            raise PaymentFlowError("玉山 3DS 的下一步按鈕不唯一")
+        next_buttons[0].click()
+        print("[INFO] 已選擇傳送 OTP 驗證密碼並進入輸入頁")
+
+        try:
+            WebDriverWait(
+                self.driver,
+                self.otp_page_wait_seconds,
+                WAIT_POLL_SECONDS,
+            ).until(self._acs_otp_fields_are_ready)
+        except TimeoutException as exc:
+            raise PaymentFlowError("逾時：玉山 3DS 未進入 OTP 輸入階段") from exc
+
+    def _read_acs_challenge(self) -> AcsChallenge:
+        if not _is_esun_acs_origin(self.driver.current_url):
+            raise PaymentFlowError("玉山 3DS 來源網址不符")
+        if len(self.driver.find_elements(By.CSS_SELECTOR, "form#acs_challenge")) != 1:
+            raise PaymentFlowError("玉山 3DS 驗證表單不唯一")
+
+        self._ensure_acs_otp_entry_stage()
+        amount = _parse_acs_amount(self.driver.find_element(By.TAG_NAME, "body").text)
+        radios = self.driver.find_elements(
+            By.CSS_SELECTOR,
+            'input[type="radio"][name="identifier"]',
+        )
+        identifiers = _normalize_identifiers(
+            radio.get_attribute("value") for radio in radios
+        )
+        transaction_id = (
+            self.driver.find_element(By.CSS_SELECTOR, "#acsTransID").get_attribute("value")
+            or ""
+        ).strip()
+        if not transaction_id:
+            raise PaymentFlowError("玉山 3DS 交易識別值缺失")
+        return AcsChallenge(
+            amount=amount,
+            identifiers=identifiers,
+            transaction_id=transaction_id,
+        )
+
+    def _submit_acs_otp(
+        self,
+        challenge: AcsChallenge,
+        event: OTPEvent,
+    ) -> None:
+        if event.identifier is None or event.amount is None:
+            raise PaymentFlowError("玉山簡訊缺少金額或網頁識別碼")
+        if event.amount != challenge.amount:
+            raise PaymentFlowError("簡訊金額與玉山 3DS 交易金額不符")
+        if event.identifier not in challenge.identifiers:
+            raise PaymentFlowError("簡訊網頁識別碼不在玉山 3DS 候選值中")
+
+        if not _is_esun_acs_origin(self.driver.current_url):
+            raise PaymentFlowError("送出前玉山 3DS 來源網址已改變")
+        if len(self.driver.find_elements(By.CSS_SELECTOR, "form#acs_challenge")) != 1:
+            raise PaymentFlowError("送出前玉山 3DS 表單已改變")
+        current_transaction_id = (
+            self.driver.find_element(By.CSS_SELECTOR, "#acsTransID").get_attribute("value")
+            or ""
+        ).strip()
+        if not hmac.compare_digest(current_transaction_id, challenge.transaction_id):
+            raise PaymentFlowError("送出前玉山 3DS 交易識別值已改變")
+        if _parse_acs_amount(self.driver.find_element(By.TAG_NAME, "body").text) != challenge.amount:
+            raise PaymentFlowError("送出前玉山 3DS 交易金額已改變")
+
+        current_radios = self.driver.find_elements(
+            By.CSS_SELECTOR,
+            'input[type="radio"][name="identifier"]',
+        )
+        if _normalize_identifiers(
+            radio.get_attribute("value") for radio in current_radios
+        ) != challenge.identifiers:
+            raise PaymentFlowError("送出前玉山 3DS 網頁識別碼候選值已改變")
+        matching_radios = [
+            radio
+            for radio in current_radios
+            if (radio.get_attribute("value") or "").strip().upper() == event.identifier
+        ]
+        if len(matching_radios) != 1:
+            raise PaymentFlowError("無法唯一選取簡訊對應的網頁識別碼")
+        matching_radio = matching_radios[0]
+        matching_radio.click()
+        if not matching_radio.is_selected():
+            raise PaymentFlowError("玉山 3DS 網頁識別碼未成功選取")
+
+        challenge_input = self.driver.find_element(By.CSS_SELECTOR, "#challengeValue")
+        challenge_input.clear()
+        challenge_input.send_keys(event.code)
+        if (challenge_input.get_attribute("value") or "") != event.code:
+            raise PaymentFlowError("玉山 3DS OTP 欄位未成功設定")
+        submit_buttons = [
+            element
+            for element in self.driver.find_elements(
+                By.CSS_SELECTOR,
+                "button#btnSubmit[type=button]",
+            )
+            if element.is_displayed() and element.is_enabled()
+        ]
+        if len(submit_buttons) != 1:
+            raise PaymentFlowError("玉山 3DS OTP 送出按鈕不唯一")
+        submit_buttons[0].click()
+
+    def _wait_for_confirmed_esun_result(self) -> None:
+        deadline = time.monotonic() + self.otp_result_wait_seconds
+        while time.monotonic() < deadline:
+            try:
+                page_text = self.driver.find_element(By.TAG_NAME, "body").text
+                current_url = self.driver.current_url
+            except (NoSuchElementException, StaleElementReferenceException, WebDriverException):
+                time.sleep(WAIT_POLL_SECONDS)
+                continue
+            if _is_ruten_payment_success(current_url, page_text):
+                print("[INFO] 已確認信用卡授權與繳費成功")
+                return
+            if any(text.lower() in page_text.lower() for text in PAYMENT_FAILURE_TEXT):
+                raise PaymentFlowError("玉山 3DS 驗證或付款交易失敗")
+            time.sleep(WAIT_POLL_SECONDS)
+        raise PaymentFlowError("玉山 3DS 送出後無法確認露天繳費成功")
+
+    def _complete_esun_3ds(self, not_before: float, client: OTPRelayClient) -> None:
+        challenge = self._read_acs_challenge()
+        print("[INFO] 已驗證玉山 3DS 來源、金額與網頁識別碼候選值")
+        event = client.wait_for_event(
+            not_before=not_before,
+            timeout_seconds=self.otp_wait_seconds,
+        )
+        self._submit_acs_otp(challenge, event)
+        print("[INFO] 已送出一次與交易相符的 OTP（驗證碼不會寫入日誌）")
+        self._wait_for_confirmed_esun_result()
+
     def _wait_for_otp_input_or_frictionless_success(self) -> Optional[Any]:
         deadline = time.monotonic() + self.otp_page_wait_seconds
         while time.monotonic() < deadline:
@@ -416,20 +659,60 @@ class Ruten:
         not_before: float,
         client: Optional[OTPRelayClient] = None,
     ) -> None:
-        otp_input = self._wait_for_otp_input_or_frictionless_success()
+        deadline = time.monotonic() + self.otp_page_wait_seconds
+        otp_input: Optional[Any] = None
+        while time.monotonic() < deadline:
+            try:
+                current_url = self.driver.current_url
+                page_text = self.driver.find_element(By.TAG_NAME, "body").text
+            except (NoSuchElementException, StaleElementReferenceException, WebDriverException):
+                current_url = ""
+                page_text = ""
+
+            if _is_ruten_payment_success(current_url, page_text):
+                print("[INFO] 此交易未要求 OTP，已確認露天繳費成功")
+                return
+            if _is_esun_acs_origin(current_url):
+                forms = self.driver.find_elements(By.CSS_SELECTOR, "form#acs_challenge")
+                if len(forms) > 1:
+                    raise PaymentFlowError("玉山 3DS 驗證表單不唯一")
+                if len(forms) == 1:
+                    if client is None:
+                        if not self.otp_server_url or not self.otp_consumer_token:
+                            raise PaymentFlowError(
+                                "付款需要 OTP，但未設定 OTP_SERVER_URL/OTP_CONSUMER_TOKEN 或 [OTP] 設定"
+                            )
+                        client = OTPRelayClient(
+                            self.otp_server_url,
+                            self.otp_consumer_token,
+                        )
+                    self._complete_esun_3ds(not_before, client)
+                    return
+            if any(text.lower() in page_text.lower() for text in PAYMENT_FAILURE_TEXT):
+                raise PaymentFlowError("付款頁顯示交易或驗證失敗")
+
+            otp_input = self.find_otp_input()
+            if otp_input is not None:
+                break
+            if self._page_has_text(PAYMENT_SUCCESS_TEXT):
+                print("[INFO] 此交易未要求 OTP，已由銀行直接授權")
+                return
+            time.sleep(WAIT_POLL_SECONDS)
         if otp_input is None:
-            print("[INFO] 此交易未要求 OTP，已由銀行直接授權")
-            return
-        if not self.otp_server_url or not self.otp_consumer_token:
-            raise PaymentFlowError(
-                "付款需要 OTP，但未設定 OTP_SERVER_URL/OTP_CONSUMER_TOKEN 或 [OTP] 設定"
-            )
+            raise PaymentFlowError("逾時：找不到玉山 3DS 或其他驗證碼欄位")
+        if client is None:
+            if not self.otp_server_url or not self.otp_consumer_token:
+                raise PaymentFlowError(
+                    "付款需要 OTP，但未設定 OTP_SERVER_URL/OTP_CONSUMER_TOKEN 或 [OTP] 設定"
+                )
+            client = OTPRelayClient(self.otp_server_url, self.otp_consumer_token)
 
         challenge_url = self.driver.current_url
         print("[INFO] 已找到 3DS 驗證頁，等待手機轉送的新簡訊")
-        if client is None:
-            client = OTPRelayClient(self.otp_server_url, self.otp_consumer_token)
-        code = client.wait_for_code(not_before=not_before, timeout_seconds=self.otp_wait_seconds)
+        code = client.wait_for_code(
+            not_before=not_before,
+            timeout_seconds=self.otp_wait_seconds,
+        )
         print("[INFO] 已取得一次性驗證碼，準備送出（驗證碼不會寫入日誌）")
         self._submit_otp(otp_input, code)
         self._wait_for_3ds_result(challenge_url)
@@ -442,6 +725,7 @@ class Ruten:
             print("[INFO] 目前沒有費用需要繳交")
             return "no_fee"
 
+        self._wait_for_payment_form()
         self._click((By.XPATH, '//input[@id="accept"]'))
         fields = (
             ('//input[@id="crd_rocid"]', self.config["Ruten"]["userid"]),
@@ -453,7 +737,6 @@ class Ruten:
             ('//input[@id="crd_n3"]', self.config[self.card_type]["card_n3"]),
             ('//input[@id="crd_n4"]', self.config[self.card_type]["card_n4"]),
             ('//input[@id="crd_l3"]', self.config[self.card_type]["card_safe"]),
-            ('//input[@id="zipcode"]', self.config["Ruten"]["zipcode"]),
             ('//input[@id="zipcode_accurate"]', self.config["Ruten"]["zipcode_accurate"]),
         )
         for xpath, value in fields:

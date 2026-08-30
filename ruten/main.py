@@ -19,6 +19,7 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional
 from urllib.parse import parse_qs, unquote
 from uuid import uuid4
@@ -35,6 +36,20 @@ OTP_KEYWORD_PATTERN = re.compile(
 )
 SIX_DIGIT_PATTERN = re.compile(r"(?<![0-9])([0-9]{6})(?![0-9])")
 GENERIC_CODE_PATTERN = re.compile(r"(?<![0-9])([0-9]{4,8})(?![0-9])")
+ESUN_REQUIRED_SMS_MARKERS = ("玉山卡網路消費", "網頁識別碼", "交易驗證碼")
+ESUN_AMOUNT_PATTERN = re.compile(
+    r"新台幣\s*TWD\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*元",
+    re.IGNORECASE,
+)
+ESUN_IDENTIFIER_PATTERN = re.compile(r"網頁識別碼\s*([A-Za-z]{4})(?![A-Za-z])")
+ESUN_OTP_PATTERN = re.compile(r"交易驗證碼\s*([0-9]{6})(?![0-9])")
+
+
+@dataclass(frozen=True)
+class ParsedOTPEvent:
+    code: str
+    identifier: Optional[str] = None
+    amount: Optional[str] = None
 
 
 def extract_otp(message: str) -> Optional[str]:
@@ -51,6 +66,37 @@ def extract_otp(message: str) -> Optional[str]:
     if len(generic_codes) == 1:
         return generic_codes[0]
     return None
+
+
+def extract_otp_event(message: str) -> Optional[ParsedOTPEvent]:
+    """Extract an OTP plus strict E.Sun correlation metadata when present."""
+    if any(marker in message for marker in ESUN_REQUIRED_SMS_MARKERS):
+        if not all(marker in message for marker in ESUN_REQUIRED_SMS_MARKERS):
+            return None
+        amount_matches = ESUN_AMOUNT_PATTERN.findall(message)
+        identifier_matches = ESUN_IDENTIFIER_PATTERN.findall(message)
+        code_matches = ESUN_OTP_PATTERN.findall(message)
+        if not (
+            len(amount_matches) == 1
+            and len(identifier_matches) == 1
+            and len(code_matches) == 1
+        ):
+            return None
+        try:
+            amount = Decimal(amount_matches[0].replace(",", ""))
+        except InvalidOperation:
+            return None
+        if not amount.is_finite() or amount <= 0:
+            return None
+        normalized_amount = format(amount.normalize(), "f")
+        return ParsedOTPEvent(
+            code=code_matches[0],
+            identifier=identifier_matches[0].upper(),
+            amount=normalized_amount,
+        )
+
+    code = extract_otp(message)
+    return ParsedOTPEvent(code=code) if code is not None else None
 
 
 def generate_smsforwarder_signature(timestamp_ms: str, secret: str) -> str:
@@ -127,6 +173,8 @@ class OTPResponse(BaseModel):
     code: str
     sender: str
     received_at: float
+    identifier: Optional[str] = None
+    amount: Optional[str] = None
 
 
 @dataclass
@@ -137,6 +185,8 @@ class OTPRecord:
     received_at: float
     created_at: float
     expires_at: float
+    identifier: Optional[str] = None
+    amount: Optional[str] = None
 
 
 class OTPStore:
@@ -166,8 +216,8 @@ class OTPStore:
         if received_at > current_time + 60:
             raise ValueError("SMS received_at is too far in the future")
 
-        code = extract_otp(payload.message)
-        if code is None:
+        event = extract_otp_event(payload.message)
+        if event is None:
             raise ValueError("No unambiguous 4-8 digit OTP found in SMS")
 
         with self._condition:
@@ -175,12 +225,14 @@ class OTPStore:
             if payload.request_id in self._seen_requests:
                 raise KeyError("request_id has already been accepted")
             record = OTPRecord(
-                code=code,
+                code=event.code,
                 sender=payload.sender,
                 request_id=payload.request_id,
                 received_at=received_at,
                 created_at=current_time,
                 expires_at=current_time + self.ttl_seconds,
+                identifier=event.identifier,
+                amount=event.amount,
             )
             self._records.append(record)
             self._seen_requests[payload.request_id] = record.expires_at
@@ -382,7 +434,13 @@ def create_app(
         )
         if record is None:
             return Response(status_code=status.HTTP_204_NO_CONTENT)
-        return OTPResponse(code=record.code, sender=record.sender, received_at=record.received_at)
+        return OTPResponse(
+            code=record.code,
+            sender=record.sender,
+            received_at=record.received_at,
+            identifier=record.identifier,
+            amount=record.amount,
+        )
 
     return application
 

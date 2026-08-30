@@ -29,6 +29,26 @@ class OTPStoreTests(unittest.TestCase):
         self.assertIsNone(extract_otp("OTP for transaction 1234, amount 5678"))
         self.assertEqual(extract_otp("交易序號 123456，驗證碼：654321"), "654321")
 
+    def test_extracts_esun_correlation_metadata(self):
+        now = time.time()
+        store = OTPStore(ttl_seconds=300)
+
+        record = store.put(
+            SMSPayload(
+                message=(
+                    "玉山卡網路消費，新台幣 TWD 1,234 元，"
+                    "網頁識別碼 test，交易驗證碼 246810"
+                ),
+                sender="BANK",
+                request_id="request-esun-metadata",
+            ),
+            now=now,
+        )
+
+        self.assertEqual(record.code, "246810")
+        self.assertEqual(getattr(record, "identifier", None), "TEST")
+        self.assertEqual(getattr(record, "amount", None), "1234")
+
     def test_consume_is_fresh_and_one_time(self):
         now = time.time()
         store = OTPStore(ttl_seconds=300)
@@ -262,6 +282,23 @@ class OTPApiIntegrationTests(unittest.TestCase):
         consumed = self.consume(not_before)
         self.assertEqual(consumed.status_code, 200)
         self.assertEqual(consumed.json()["code"], "975310")
+
+    def test_smsforwarder_returns_esun_correlation_metadata(self):
+        not_before = time.time() - 1
+        response = self.post_smsforwarder(
+            content=(
+                "玉山卡網路消費，新台幣 TWD 1,234 元，"
+                "網頁識別碼 test，交易驗證碼 246810"
+            )
+        )
+        self.assertEqual(response.status_code, 202, response.text)
+
+        consumed = self.consume(not_before)
+
+        self.assertEqual(consumed.status_code, 200)
+        self.assertEqual(consumed.json()["code"], "246810")
+        self.assertEqual(consumed.json().get("identifier"), "TEST")
+        self.assertEqual(consumed.json().get("amount"), "1234")
 
     def test_smsforwarder_rejects_bad_signature_expired_time_and_sender(self):
         bad_signature = self.post_smsforwarder(signature="not-a-valid-signature")
