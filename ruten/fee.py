@@ -456,17 +456,38 @@ class Ruten:
         if self._acs_otp_fields_are_ready(self.driver):
             return
 
-        methods = [
+        method_labels = [
             element
             for element in self.driver.find_elements(
                 By.XPATH,
-                "//*[normalize-space(.)='傳送OTP驗證密碼']",
+                "//label[normalize-space(.)='傳送OTP驗證密碼']",
             )
             if element.is_displayed() and element.is_enabled()
         ]
-        if len(methods) != 1:
-            raise PaymentFlowError("玉山 3DS 的 OTP 驗證方式不唯一")
-        methods[0].click()
+        method_id = (
+            method_labels[0].get_attribute("for")
+            if len(method_labels) == 1
+            else None
+        )
+        method_radios = [
+            element
+            for element in self.driver.find_elements(
+                By.CSS_SELECTOR,
+                'input[type="radio"][name="challengeValue"]',
+            )
+            if element.get_attribute("id") == method_id
+        ]
+        if len(method_labels) != 1 or len(method_radios) != 1:
+            raise PaymentFlowError(
+                "玉山 3DS 的 OTP 驗證方式不唯一"
+                f"（label={len(method_labels)}, radio={len(method_radios)}）"
+            )
+        method_label = method_labels[0]
+        method_radio = method_radios[0]
+        if not method_radio.is_selected():
+            method_label.click()
+        if not method_radio.is_selected():
+            raise PaymentFlowError("玉山 3DS 的 OTP 驗證方式未成功選取")
 
         next_buttons = [
             element
@@ -602,6 +623,7 @@ class Ruten:
         event = client.wait_for_event(
             not_before=not_before,
             timeout_seconds=self.otp_wait_seconds,
+            require_correlation=True,
         )
         self._submit_acs_otp(challenge, event)
         print("[INFO] 已送出一次與交易相符的 OTP（驗證碼不會寫入日誌）")

@@ -8,19 +8,30 @@ from otp_client import OTPEvent
 
 
 class FakeElement:
-    def __init__(self, on_click=None, *, text="", attributes=None, selected=False):
+    def __init__(
+        self,
+        on_click=None,
+        *,
+        text="",
+        attributes=None,
+        selected=False,
+        displayed=True,
+        enabled=True,
+    ):
         self.value = ""
         self.clicked = False
         self.on_click = on_click
         self.text = text
         self.attributes = dict(attributes or {})
         self.selected = selected
+        self.displayed = displayed
+        self.enabled = enabled
 
     def is_displayed(self):
-        return True
+        return self.displayed
 
     def is_enabled(self):
-        return True
+        return self.enabled
 
     def clear(self):
         self.value = ""
@@ -127,7 +138,27 @@ class FakeEsunDriver:
         self.stage = "method"
         self.current_url = "https://acs.esunbank.com.tw/3ds/challenge"
         self.body = FakeElement(text="交易金額 TWD 1,234")
-        self.method = FakeElement(text="傳送OTP驗證密碼")
+        self.method_container = FakeElement(text="傳送OTP驗證密碼")
+        self.method_radio = FakeElement(
+            attributes={
+                "id": "challengeValue1",
+                "name": "challengeValue",
+                "type": "radio",
+            },
+            displayed=False,
+        )
+        self.method_label = FakeElement(
+            on_click=lambda: setattr(self.method_radio, "selected", True),
+            text="傳送OTP驗證密碼",
+            attributes={"for": "challengeValue1"},
+        )
+        self.wallet_radio = FakeElement(
+            attributes={
+                "id": "challengeValue2",
+                "name": "challengeValue",
+                "type": "radio",
+            }
+        )
         self.next_button = FakeElement(on_click=self.show_entry, text="下一步")
         self.transaction = FakeElement(attributes={"value": "transaction-123"})
         self.challenge = FakeElement()
@@ -153,7 +184,19 @@ class FakeEsunDriver:
         if value == "form#acs_challenge":
             return [] if self.stage == "success" else [FakeElement()]
         if value == "//*[normalize-space(.)='傳送OTP驗證密碼']":
-            return [self.method] if self.stage == "method" else []
+            return (
+                [self.method_container, self.method_label]
+                if self.stage == "method"
+                else []
+            )
+        if value == "//label[normalize-space(.)='傳送OTP驗證密碼']":
+            return [self.method_label] if self.stage == "method" else []
+        if value == 'input[type="radio"][name="challengeValue"]':
+            return (
+                [self.method_radio, self.wallet_radio]
+                if self.stage == "method"
+                else []
+            )
         if value == "//button[normalize-space(.)='下一步']":
             return [self.next_button] if self.stage == "method" else []
         if self.stage != "entry":
@@ -182,8 +225,14 @@ class FakeEsunOTPClient:
         self.event = event
         self.calls = []
 
-    def wait_for_event(self, *, not_before, timeout_seconds):
-        self.calls.append((not_before, timeout_seconds))
+    def wait_for_event(
+        self,
+        *,
+        not_before,
+        timeout_seconds,
+        require_correlation=False,
+    ):
+        self.calls.append((not_before, timeout_seconds, require_correlation))
         return self.event
 
 
@@ -223,7 +272,7 @@ class FeeThreeDSTests(unittest.TestCase):
         self.assertTrue(ruten.driver.submit.clicked)
         self.assertEqual(FakeOTPClient.calls[0][2], 12345.0)
 
-    def test_completes_esun_two_stage_challenge_with_matching_identifier(self):
+    def test_completes_esun_by_clicking_label_for_hidden_method_radio(self):
         ruten = self.make_ruten()
         ruten.driver = FakeEsunDriver()
         client = FakeEsunOTPClient(
@@ -236,15 +285,20 @@ class FeeThreeDSTests(unittest.TestCase):
             )
         )
 
-        ruten.complete_3ds(not_before=12345.0, client=client)
+        try:
+            ruten.complete_3ds(not_before=12345.0, client=client)
+        except PaymentFlowError as exc:
+            self.fail(f"同一 OTP 選項的容器與 label 不應造成流程中止: {exc}")
 
-        self.assertTrue(ruten.driver.method.clicked)
+        self.assertTrue(ruten.driver.method_radio.is_selected())
+        self.assertTrue(ruten.driver.method_label.clicked)
+        self.assertFalse(ruten.driver.wallet_radio.is_selected())
         self.assertTrue(ruten.driver.next_button.clicked)
         self.assertTrue(ruten.driver.radios[0].is_selected())
         self.assertFalse(ruten.driver.radios[1].is_selected())
         self.assertEqual(ruten.driver.challenge.value, "864209")
         self.assertTrue(ruten.driver.submit.clicked)
-        self.assertEqual(client.calls, [(12345.0, 30)])
+        self.assertEqual(client.calls, [(12345.0, 30, True)])
 
     def test_stops_before_otp_submit_when_esun_amount_does_not_match(self):
         ruten = self.make_ruten()

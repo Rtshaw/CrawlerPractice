@@ -115,9 +115,17 @@ class OTPRelayClient:
             received_at=received_at,
         )
 
-    def wait_for_event(self, *, not_before: float, timeout_seconds: int = 180) -> OTPEvent:
+    def wait_for_event(
+        self,
+        *,
+        not_before: float,
+        timeout_seconds: int = 180,
+        require_correlation: bool = False,
+    ) -> OTPEvent:
         deadline = time.monotonic() + timeout_seconds
         last_error: Optional[Exception] = None
+        if require_correlation:
+            print("[INFO] OTP relay 開始等待簡訊轉發事件")
 
         while time.monotonic() < deadline:
             remaining = deadline - time.monotonic()
@@ -137,6 +145,8 @@ class OTPRelayClient:
                 continue
 
             if response.status_code == 204:
+                if require_correlation:
+                    print("[INFO] OTP relay 尚未收到新的簡訊轉發，繼續等待")
                 continue
             if response.status_code in (401, 403, 503):
                 raise OTPRelayError(
@@ -151,7 +161,21 @@ class OTPRelayClient:
                 payload = response.json()
             except (TypeError, ValueError) as exc:
                 raise OTPRelayError("OTP relay returned an invalid response") from exc
-            return self._parse_event(payload)
+            event = self._parse_event(payload)
+            if require_correlation and (
+                event.identifier is None or event.amount is None
+            ):
+                print(
+                    "[INFO] OTP relay 已收到簡訊轉發，"
+                    "但缺少交易關聯資料，已忽略並繼續等待"
+                )
+                last_error = OTPRelayError(
+                    "OTP relay returned an event without correlation metadata"
+                )
+                continue
+            if require_correlation:
+                print("[INFO] OTP relay 已收到包含交易關聯資料的簡訊轉發")
+            return event
 
         detail = f": {last_error}" if last_error else ""
         raise OTPTimeoutError(f"No fresh OTP received within {timeout_seconds} seconds{detail}")
