@@ -9,6 +9,7 @@ services:
     restart: unless-stopped
     init: true
     environment:
+      TZ: Asia/Taipei
       SMSFORWARDER_SECRET: ${SMSFORWARDER_SECRET:?SMSFORWARDER_SECRET is required}
       OTP_CONSUMER_TOKEN: ${OTP_CONSUMER_TOKEN:?OTP_CONSUMER_TOKEN is required}
       OTP_ALLOWED_SENDER_PATTERN: ${OTP_ALLOWED_SENDER_PATTERN:?OTP_ALLOWED_SENDER_PATTERN is required}
@@ -16,11 +17,16 @@ services:
       OTP_TTL_SECONDS: ${OTP_TTL_SECONDS:-300}
       OTP_MAX_LONG_POLL_SECONDS: ${OTP_MAX_LONG_POLL_SECONDS:-30}
       OTP_UPLOAD_TOKEN: ${OTP_UPLOAD_TOKEN:-}
+      OTP_AUDIT_LOG_PATH: /var/log/ruten-otp/audit.jsonl
+      OTP_AUDIT_LOG_BACKUP_COUNT: ${OTP_AUDIT_LOG_BACKUP_COUNT:-30}
+      OTP_AUDIT_LOG_MAX_BYTES: ${OTP_AUDIT_LOG_MAX_BYTES:-10485760}
     expose:
       - "8000"
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
+    volumes:
+      - ./runtime/logs:/var/log/ruten-otp
     cap_drop:
       - ALL
     security_opt:

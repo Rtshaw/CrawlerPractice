@@ -5,6 +5,7 @@
 ```text
 ruten/
 ├─ main.py
+├─ audit_log.py
 └─ docker/
    ├─ Dockerfile
    ├─ Dockerfile.dockerignore
@@ -28,6 +29,26 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32)); print(secrets.toke
 - 將 `OTP_ALLOWED_SENDER_PATTERN` 改為 SmsForwarder 日誌中的實際銀行 sender regex。
 - 核對現有 Traefik 的 `TRAEFIK_NETWORK`、entrypoint 與 certificate resolver 名稱。
 
+建立持久化 audit log 目錄。容器以 UID/GID `10001:10001` 執行，目錄必須可寫：
+
+```sh
+mkdir -p runtime/logs
+chown 10001:10001 runtime/logs
+chmod 750 runtime/logs
+```
+
+Windows 11 + Docker Desktop 請在 PowerShell 使用：
+
+```powershell
+New-Item -ItemType Directory -Force .\runtime\logs | Out-Null
+docker compose config
+docker compose up -d --build
+```
+
+Windows 不需要執行 `chown`、`chmod`；若容器因 `/var/log/ruten-otp` 權限錯誤無法啟動，
+請將 `runtime\logs` 的 Windows ACL 給執行 Docker Desktop 的帳號 Modify 權限，再查看
+`docker compose logs relay`。Relay 啟動時會立即開啟 audit log，因此權限問題會直接暴露。
+
 ```sh
 docker network inspect traefik
 docker compose config
@@ -44,6 +65,46 @@ curl -fsS https://opt.yurishop.xyz/health
 ```
 
 HTTP 應永久轉至 HTTPS；HTTPS JSON 的 `status` 應為 `ok`，且 `smsforwarder_configured`、`consumer_configured` 應為 `true`。
+
+## Persistent audit log
+
+Relay 會將 sanitized JSONL audit log 寫入：
+
+```text
+./runtime/logs/audit.jsonl
+```
+
+Compose 將此目錄掛載至容器 `/var/log/ruten-otp`。每個 audit 檔上限預設為
+10 MiB，超過後輪替並保留 30 個輪替檔，總量約不超過 310 MiB；可用
+`OTP_AUDIT_LOG_MAX_BYTES` 與 `OTP_AUDIT_LOG_BACKUP_COUNT` 調整。每行 timestamp
+固定使用 `Asia/Taipei`，所以可直接依時間查詢。Docker stdout 的近期 log rotation
+仍保留，但歷史查詢應以 `runtime/logs/audit.jsonl*` 為準。
+
+Audit event 只包含事件名稱、HTTP 狀態、拒絕原因、時間差、雜湊指紋與布林欄位；
+不包含 OTP、SMS 原文、Token、卡號、完整 sender、交易金額或網頁識別碼。
+
+查詢 02:40（台灣時間）附近的事件：
+
+```sh
+grep -E '2026-09-08T02:4[0-3]|smsforwarder|otp.consume|relay.initialized' \
+  runtime/logs/audit.jsonl*
+```
+
+PowerShell 可使用：
+
+```powershell
+Get-ChildItem .\runtime\logs\audit.jsonl* |
+  Select-String -Pattern '2026-09-08T02:4[0-3]|smsforwarder|otp.consume|relay.initialized'
+```
+
+判讀方式：
+
+- 沒有 `smsforwarder.request`：手機沒有打到 relay，或查錯 relay/時間範圍。
+- 有 `smsforwarder.rejected`：查看同一行的 `reason` 與 `status_code`。
+- 有 `smsforwarder.accepted` 但 `otp.consume` 一直是 `outcome=empty`：檢查
+  `not_before`、relay 是否重啟，以及 OTP 是否已被其他 consumer 取走。
+- 有 `otp.consume` 的 `outcome=delivered`：Win11 端應能取得該次 OTP；後續問題在
+  3DS/瀏覽器階段。
 
 SmsForwarder WebServer：
 

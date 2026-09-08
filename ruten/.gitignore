@@ -5,6 +5,7 @@ config.ini
 cookies.json
 .fee.lock
 logs/
+docker/runtime/
 
 # Python
 __pycache__/

@@ -54,6 +54,9 @@ cp .env.example .env
 python3 -c "import secrets; print(secrets.token_urlsafe(32)); print(secrets.token_urlsafe(32))"
 chmod 600 .env
 # 編輯 .env：填入兩個不同 secrets、實際銀行 sender regex，並核對 Traefik 名稱
+mkdir -p runtime/logs
+chown 10001:10001 runtime/logs
+chmod 750 runtime/logs
 
 docker network inspect traefik       # 若名稱不同，修改 TRAEFIK_NETWORK
 docker compose config                # 部署前檢查展開後設定
@@ -61,6 +64,20 @@ docker compose up -d --build
 docker compose ps
 docker compose logs --tail=100 relay
 ```
+
+若 runtime 是 Windows 11 + Docker Desktop，改用 PowerShell 建立目錄：
+
+```powershell
+New-Item -ItemType Directory -Force .\runtime\logs | Out-Null
+docker compose config
+docker compose up -d --build
+```
+
+Windows 不需要執行 `chown`、`chmod`；若出現 `/var/log/ruten-otp` 權限錯誤，請將
+`runtime\logs` 的 Windows ACL 給 Docker Desktop 執行帳號 Modify 權限。
+
+Relay 的歷史 audit log 會持久化在 `docker/runtime/logs/audit.jsonl*`；Docker stdout
+只保留近期輪替內容。詳細事件欄位與查詢方式請見 [`docker/README.md`](docker/README.md)。
 
 `compose.yml` 不發布 host port；relay 只透過 external Traefik network 的內部 `8000` 提供服務。容器使用 UID 10001、唯讀 root filesystem、移除全部 capabilities，且 image build context 不包含付款相關檔案。
 

@@ -13,7 +13,7 @@ WORKDIR /app
 COPY docker/requirements-server.txt ./
 RUN python -m pip install --no-cache-dir --requirement requirements-server.txt
 
-COPY --chown=app:app main.py ./
+COPY --chown=app:app main.py audit_log.py ./
 
 USER 10001:10001
 EXPOSE 8000
