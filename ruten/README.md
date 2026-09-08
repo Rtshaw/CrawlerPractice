@@ -13,6 +13,12 @@
 5. `fee.py` 用獨立 consumer token 長輪詢 `/api/v1/otp/next`；OTP 只可讀取一次且會逾時刪除。
 6. Selenium 跨新視窗及巢狀 iframe 找到 3DS 欄位，填碼送出並辨識成功、失敗或導回付款網站。
 
+Runtime 與紀錄位置分離如下：
+
+- **Linux SMS runtime**：執行 `ruten/docker` 的 relay，接收 SmsForwarder webhook，並將歷史 audit log 寫入 Linux 主機的 `ruten/docker/runtime/logs/audit.jsonl*`。
+- **Windows 11 fee runtime**：執行 `fee.py`、`scheduled_run.py` 與 Selenium；付款執行紀錄寫入 Win11 主機的 `ruten/logs/YYYYMMDD/*.log`。
+- Win11 端只透過 `OTP_SERVER_URL` 呼叫 Linux relay 的 HTTPS API；Linux audit log 不會出現在 Win11 的 `ruten/logs`。
+
 relay 使用記憶體佇列；服務重啟會清除尚未使用的 OTP，這是刻意的安全設計。
 
 ## 1. Python 與付款設定
@@ -64,17 +70,6 @@ docker compose up -d --build
 docker compose ps
 docker compose logs --tail=100 relay
 ```
-
-若 runtime 是 Windows 11 + Docker Desktop，改用 PowerShell 建立目錄：
-
-```powershell
-New-Item -ItemType Directory -Force .\runtime\logs | Out-Null
-docker compose config
-docker compose up -d --build
-```
-
-Windows 不需要執行 `chown`、`chmod`；若出現 `/var/log/ruten-otp` 權限錯誤，請將
-`runtime\logs` 的 Windows ACL 給 Docker Desktop 執行帳號 Modify 權限。
 
 Relay 的歷史 audit log 會持久化在 `docker/runtime/logs/audit.jsonl*`；Docker stdout
 只保留近期輪替內容。詳細事件欄位與查詢方式請見 [`docker/README.md`](docker/README.md)。

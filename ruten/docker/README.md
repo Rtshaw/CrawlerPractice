@@ -1,6 +1,6 @@
 # OTP relay Docker deployment
 
-此目錄可直接部署 FastAPI OTP relay；日本 VPS 只執行此 relay，不要上傳 `config.ini`、`cookies.json` 或在 VPS 執行 `fee.py`。Compose 會以上層 `../main.py` 建置服務，因此 VPS 上需保留以下結構：
+此目錄只部署 Linux SMS runtime 的 FastAPI OTP relay；日本 VPS 只執行此 relay，不要上傳 `config.ini`、`cookies.json` 或在 VPS 執行 `fee.py`。Win11 fee runtime 透過 HTTPS 呼叫此 relay，並在自己的 `ruten/logs/YYYYMMDD/*.log` 保存付款執行紀錄。Compose 會以上層 `../main.py` 建置服務，因此 Linux VPS 上需保留以下結構：
 
 ```text
 ruten/
@@ -36,18 +36,6 @@ mkdir -p runtime/logs
 chown 10001:10001 runtime/logs
 chmod 750 runtime/logs
 ```
-
-Windows 11 + Docker Desktop 請在 PowerShell 使用：
-
-```powershell
-New-Item -ItemType Directory -Force .\runtime\logs | Out-Null
-docker compose config
-docker compose up -d --build
-```
-
-Windows 不需要執行 `chown`、`chmod`；若容器因 `/var/log/ruten-otp` 權限錯誤無法啟動，
-請將 `runtime\logs` 的 Windows ACL 給執行 Docker Desktop 的帳號 Modify 權限，再查看
-`docker compose logs relay`。Relay 啟動時會立即開啟 audit log，因此權限問題會直接暴露。
 
 ```sh
 docker network inspect traefik
@@ -88,13 +76,6 @@ Audit event 只包含事件名稱、HTTP 狀態、拒絕原因、時間差、雜
 ```sh
 grep -E '2026-09-08T02:4[0-3]|smsforwarder|otp.consume|relay.initialized' \
   runtime/logs/audit.jsonl*
-```
-
-PowerShell 可使用：
-
-```powershell
-Get-ChildItem .\runtime\logs\audit.jsonl* |
-  Select-String -Pattern '2026-09-08T02:4[0-3]|smsforwarder|otp.consume|relay.initialized'
 ```
 
 判讀方式：
