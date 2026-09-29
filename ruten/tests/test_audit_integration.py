@@ -1,4 +1,5 @@
 import json
+import os
 import socket
 import tempfile
 import threading
@@ -8,6 +9,8 @@ from pathlib import Path
 
 import requests
 import uvicorn
+
+os.environ.setdefault("OTP_ALLOWED_SENDER_PATTERN", r"^BANK$")
 
 from audit_log import configure_audit_logger
 from main import (

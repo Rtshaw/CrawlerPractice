@@ -511,18 +511,30 @@ def create_app(
                 processing_ms=round((time.monotonic() - request_started) * 1000, 2),
             )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
-        if sender_regex and not sender_regex.search(sender):
+        allowlist_rejection = validate_sms_allowlist(
+            message,
+            sender,
+            message_regex,
+            sender_regex,
+        )
+        if allowlist_rejection:
+            detail = (
+                "SMS content is not allowed"
+                if allowlist_rejection == "message_not_allowed"
+                else "Sender is not allowed"
+            )
             audit_event(
                 audit_logger,
                 "smsforwarder.rejected",
-                reason="sender_not_allowed",
+                reason=allowlist_rejection,
                 status_code=422,
                 **_sender_audit_fields(sender),
+                message_length=len(message),
                 processing_ms=round((time.monotonic() - request_started) * 1000, 2),
             )
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Sender is not allowed",
+                detail=detail,
             )
 
         expected_signature = generate_smsforwarder_signature(
