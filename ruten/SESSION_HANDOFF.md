@@ -47,13 +47,15 @@ Android SmsForwarder
 - `GET /api/v1/otp/next`：consumer token 保護的長輪詢、consume-once OTP。
 - `POST /api/v1/otp`：保留的手動 JSON upload 相容端點，使用 `OTP_UPLOAD_TOKEN`；SmsForwarder 不使用。
 
+Production container startup model 維持 `uvicorn main:app`；本次不改用 app factory。
+
 SmsForwarder endpoint 支援：
 
 - 官方 form：`from/content/timestamp/sign`。
 - 自訂 JSON：建議 `from/org_content/timestamp/sign`。
 - 官方簽章：`Base64(HMAC-SHA256(key=secret, message=timestamp + "\n" + secret))`，相容 URL-encoded sign。
 - 預設 300 秒 timestamp 時間窗。
-- `OTP_ALLOWED_SENDER_PATTERN` sender regex。
+- `OTP_ALLOWED_MESSAGE_PATTERN` 原始 SMS body regex，作為 primary allowlist；`OTP_ALLOWED_SENDER_PATTERN` 是可選 secondary sender regex。
 - OTP 4–8 位解析、TTL、防 request replay、重送冪等回應。
 - OTP freshness 以 relay `created_at` 判斷，避免手機、台灣電腦與 VPS 時鐘偏差。
 - SmsForwarder secret、consumer token 權限分離。
@@ -91,7 +93,13 @@ Secret: 與 VPS SMSFORWARDER_SECRET 相同
 {"from":"[from]","org_content":"[org_content]","timestamp":"[timestamp]","sign":"[sign]"}
 ```
 
-轉發規則必須限制實際銀行 sender/短碼，最好再要求內容包含「驗證碼」、「動態密碼」或 `OTP`。不要轉發所有私人 SMS。relay 的 `OTP_ALLOWED_SENDER_PATTERN` 必須對應 SmsForwarder 日誌中的實際 `from`。
+轉發規則應以 SMS content regex 限制玉山 OTP，並可再限制實際銀行 sender/短碼。不要轉發所有私人 SMS。relay 的 message pattern 必須匹配原始 SMS；若設定 sender pattern，必須對應 SmsForwarder 日誌中的實際 `from`。
+
+Android/SmsForwarder content rule 範例：
+
+```regex
+(?s)(?=.*?玉山卡網路消費)(?=.*網頁識別碼)(?=.*交易驗證碼\s*[:：]?\s*\d{6})
+```
 
 ## 4. Docker / Traefik
 
@@ -127,7 +135,7 @@ cd /path/to/ruten/docker
 cp .env.example .env
 chmod 600 .env
 python3 -c "import secrets; print(secrets.token_urlsafe(32)); print(secrets.token_urlsafe(32))"
-# 編輯 .env，填入兩個不同 secrets、sender regex、Traefik 實際名稱
+# 編輯 .env，填入兩個不同 secrets、message regex、可選 sender regex、Traefik 實際名稱
 
 docker network inspect traefik
 docker compose config
@@ -141,7 +149,8 @@ docker compose logs --tail=100 relay
 ```dotenv
 SMSFORWARDER_SECRET=<random secret A>
 OTP_CONSUMER_TOKEN=<different random secret B>
-OTP_ALLOWED_SENDER_PATTERN=^實際銀行sender$
+OTP_ALLOWED_MESSAGE_PATTERN=(?s)(?=.*?玉山卡網路消費)(?=.*網頁識別碼)(?=.*交易驗證碼\s*[:：]?\s*\d{6})
+OTP_ALLOWED_SENDER_PATTERN=
 SMSFORWARDER_MAX_SKEW_SECONDS=300
 OTP_TTL_SECONDS=300
 OTP_MAX_LONG_POLL_SECONDS=30
@@ -161,7 +170,7 @@ curl -I http://opt.yurishop.xyz/health
 curl -fsS https://opt.yurishop.xyz/health
 ```
 
-HTTP 應轉 HTTPS；HTTPS 應回 `status: ok`，並且 `smsforwarder_configured`、`consumer_configured` 為 `true`。
+HTTP 應轉 HTTPS；HTTPS 應回 `status: ok`，並且 `smsforwarder_configured`、`message_filter_configured`、`consumer_configured` 為 `true`。sender filter 若留空則 `sender_filter_configured` 為 `false`。
 
 ## 5. 台灣端 fee.py
 

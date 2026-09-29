@@ -14,6 +14,8 @@ ruten/
    └─ .env.example
 ```
 
+本次 message allowlist 變更保留既有 production startup model：container 仍使用 `uvicorn main:app`。
+
 ## Deploy
 
 ```sh
@@ -26,8 +28,16 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32)); print(secrets.toke
 編輯 `.env`：
 
 - 將兩個不同亂數分別填入 `SMSFORWARDER_SECRET`、`OTP_CONSUMER_TOKEN`。
-- 將 `OTP_ALLOWED_SENDER_PATTERN` 改為 SmsForwarder 日誌中的實際銀行 sender regex。
+- 將 `OTP_ALLOWED_MESSAGE_PATTERN` 設為原始玉山 SMS body regex；`OTP_ALLOWED_SENDER_PATTERN` 是可選的 secondary sender regex。
 - 核對現有 Traefik 的 `TRAEFIK_NETWORK`、entrypoint 與 certificate resolver 名稱。
+
+Primary message pattern 範例：
+
+```regex
+(?s)(?=.*?玉山卡網路消費)(?=.*網頁識別碼)(?=.*交易驗證碼\s*[:：]?\s*\d{6})
+```
+
+兩個 allowlist 都可在 Compose `.env` 暫時為空，但 application startup 會拒絕兩者皆空的設定。`.env` 中的反斜線與 regex 展開結果請用 `docker compose config` 檢查。
 
 建立持久化 audit log 目錄。容器以 UID/GID `10001:10001` 執行，目錄必須可寫：
 
@@ -52,7 +62,7 @@ curl -I http://opt.yurishop.xyz/health
 curl -fsS https://opt.yurishop.xyz/health
 ```
 
-HTTP 應永久轉至 HTTPS；HTTPS JSON 的 `status` 應為 `ok`，且 `smsforwarder_configured`、`consumer_configured` 應為 `true`。
+HTTP 應永久轉至 HTTPS；HTTPS JSON 的 `status` 應為 `ok`，且 `smsforwarder_configured`、`message_filter_configured`、`consumer_configured` 應為 `true`。`sender_filter_configured` 依是否保留 sender regex 決定。
 
 ## Persistent audit log
 
@@ -106,5 +116,19 @@ OTP_CONSUMER_TOKEN=<與VPS相同的consumer token>
 cd /path/to/ruten/docker
 docker compose build --pull
 docker compose up -d
+docker compose logs --tail=100 relay
+```
+
+若從舊 sender-only 設定遷移，先編輯 `.env`：
+
+```dotenv
+OTP_ALLOWED_MESSAGE_PATTERN=(?s)(?=.*?玉山卡網路消費)(?=.*網頁識別碼)(?=.*交易驗證碼\s*[:：]?\s*\d{6})
+OTP_ALLOWED_SENDER_PATTERN=
+```
+
+接著執行 `docker compose config`，確認展開後的兩個變數，再執行：
+
+```sh
+docker compose up -d --build --force-recreate
 docker compose logs --tail=100 relay
 ```

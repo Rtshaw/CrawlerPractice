@@ -9,7 +9,7 @@
 1. 排程啟動 `scheduled_run.py` → `fee.py`。
 2. `fee.py` 在點擊付款前向 relay 取得伺服器時間作為 `not_before`；relay 不可用時不會送出付款。
 3. 手機收到銀行 SMS，SmsForwarder 規則把它送至 `/api/v1/smsforwarder`。
-4. relay 依 SmsForwarder 官方規格驗證 `timestamp + "\n" + secret` 的 HMAC-SHA256/Base64 `sign`、時間窗與 sender，再擷取 4–8 位 OTP。
+4. relay 依 SmsForwarder 官方規格驗證 `timestamp + "\n" + secret` 的 HMAC-SHA256/Base64 `sign`、時間窗與原始 SMS body；`OTP_ALLOWED_SENDER_PATTERN` 可作為額外 sender 限制，再擷取 4–8 位 OTP。
 5. `fee.py` 用獨立 consumer token 長輪詢 `/api/v1/otp/next`；OTP 只可讀取一次且會逾時刪除。
 6. Selenium 跨新視窗及巢狀 iframe 找到 3DS 欄位，填碼送出並辨識成功、失敗或導回付款網站。
 
@@ -59,7 +59,7 @@ cd /path/to/ruten/docker
 cp .env.example .env
 python3 -c "import secrets; print(secrets.token_urlsafe(32)); print(secrets.token_urlsafe(32))"
 chmod 600 .env
-# 編輯 .env：填入兩個不同 secrets、實際銀行 sender regex，並核對 Traefik 名稱
+# 編輯 .env：填入兩個不同 secrets、玉山 message regex、可選 sender regex，並核對 Traefik 名稱
 mkdir -p runtime/logs
 chown 10001:10001 runtime/logs
 chmod 750 runtime/logs
@@ -83,7 +83,7 @@ curl -I http://opt.yurishop.xyz/health
 curl -fsS https://opt.yurishop.xyz/health
 ```
 
-第一個請求應 redirect 至 HTTPS；第二個應回傳 `status: ok`，且 `smsforwarder_configured`、`consumer_configured` 都是 `true`。若既有 Traefik network、entrypoint 或 certificate resolver 不是預設的 `traefik`、`web`、`websecure`、`letsencrypt`，請修改 `.env` 中對應的 `TRAEFIK_*` 值。
+第一個請求應 redirect 至 HTTPS；第二個應回傳 `status: ok`，且 `smsforwarder_configured`、`message_filter_configured`、`consumer_configured` 都是 `true`。`sender_filter_configured` 只有在保留 sender regex 時才是 `true`。若既有 Traefik network、entrypoint 或 certificate resolver 不是預設的 `traefik`、`web`、`websecure`、`letsencrypt`，請修改 `.env` 中對應的 `TRAEFIK_*` 值。
 
 更新服務：
 
@@ -93,7 +93,18 @@ docker compose up -d
 docker image prune -f
 ```
 
-官方 SmsForwarder `sign` 只簽 timestamp，並未涵蓋 SMS 內容，因此 HTTPS、300 秒時間窗及嚴格 sender regex 都不可省略。`.env` 含 secrets，不可提交或傳送給第三方。
+官方 SmsForwarder `sign` 只簽 timestamp，並未涵蓋 SMS 內容，因此 HTTPS、300 秒時間窗及 message allowlist 都不可省略；sender regex 是可選的 secondary hardening。`.env` 含 secrets，不可提交或傳送給第三方。
+
+### 2.1 從 sender-only 設定遷移
+
+VPS 原本若只有 `OTP_ALLOWED_SENDER_PATTERN`，請在 `ruten/docker/.env` 改為 message-primary 設定；sender regex 可清空：
+
+```dotenv
+OTP_ALLOWED_MESSAGE_PATTERN=(?s)(?=.*?玉山卡網路消費)(?=.*網頁識別碼)(?=.*交易驗證碼\s*[:：]?\s*\d{6})
+OTP_ALLOWED_SENDER_PATTERN=
+```
+
+`OTP_ALLOWED_MESSAGE_PATTERN` 與 `OTP_ALLOWED_SENDER_PATTERN` 都空白時，relay 會在 startup fail-fast。修改 `.env` 後執行 `docker compose config` 檢查展開值，再用 `docker compose up -d --build --force-recreate` 載入新設定。
 
 ## 3. 設定 pppscn/SmsForwarder
 
@@ -116,13 +127,17 @@ docker image prune -f
 
 ### 3.2 SMS 轉發規則
 
-建立「短信轉發」規則並指定上述 Webhook 通道：
+建立「短信轉發」規則並指定上述 Webhook 通道。Android 端 primary rule 應使用 SMS content regex：
 
-- 優先依實際銀行 sender/短碼限制來源；也可再要求內容包含「驗證碼」、「動態密碼」或 `OTP`。
-- relay 的 `OTP_ALLOWED_SENDER_PATTERN` 應使用同樣限制。先從 SmsForwarder 轉發日誌確認實際 `from`，再設定 regex。
+```regex
+(?s)(?=.*?玉山卡網路消費)(?=.*網頁識別碼)(?=.*交易驗證碼\s*[:：]?\s*\d{6})
+```
+
+- relay 的 `OTP_ALLOWED_MESSAGE_PATTERN` 必須匹配原始 SMS body；銀行 sender/短碼變更不會影響此 primary filter。
+- 若 sender 穩定，可再設定 `OTP_ALLOWED_SENDER_PATTERN`，並先從 SmsForwarder 轉發日誌確認實際 `from`。
 - 不要建立「轉發所有 SMS」的規則，以免把私人簡訊送到伺服器。
 
-Webhook 測試若使用不含 OTP 的官方測試內容，relay 會刻意回 `422 No unambiguous ... OTP`；這代表簽章/連線可能已成功，但內容不會進入 OTP 佇列。請以 `python -m unittest discover -s tests -v` 驗證完整官方 payload，不要為了讓測試按鈕成功而關閉簽章或 sender 檢查。
+Webhook 測試若使用不符合 message allowlist 的內容，relay 會回 `422 SMS content is not allowed`；若內容符合 allowlist 但沒有唯一 OTP，才會回 `422 No unambiguous ... OTP`。請以 `python -m unittest discover -s tests -v` 驗證完整官方 payload，不要為了讓測試按鈕成功而關閉簽章或 message 檢查。
 
 官方格式參考：
 
@@ -169,6 +184,7 @@ python -m py_compile fee.py main.py otp_client.py scheduled_run.py sms.py
 
 - `/api/v1/smsforwarder` 回 `401 Invalid signature`：SmsForwarder Secret 不一致，或 sign/template 被改動。
 - 回 `401 Webhook timestamp expired`：同步手機與伺服器時間；預設只接受 300 秒內請求。
+- 回 `422 SMS content is not allowed`：`OTP_ALLOWED_MESSAGE_PATTERN` 與原始 `org_content`/`content`/`msg` 不符；確認 SmsForwarder webParams 保留原始 SMS。
 - 回 `422 Sender is not allowed`：`OTP_ALLOWED_SENDER_PATTERN` 與實際 `from` 不符。
 - 回 `422 No unambiguous...`：內容沒有唯一 4–8 位 OTP，或模板沒有保留原始 SMS。
 - `fee.py` 回 consumer `401`：`OTP_CONSUMER_TOKEN` 不一致；它與 SmsForwarder Secret 必須不同。
