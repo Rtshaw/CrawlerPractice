@@ -1,14 +1,19 @@
 import base64
 import hashlib
 import hmac
+import os
+import re
 import socket
 import threading
 import time
 import unittest
 from urllib.parse import quote_plus
+from unittest.mock import patch
 
 import requests
 import uvicorn
+
+os.environ.setdefault("OTP_ALLOWED_SENDER_PATTERN", r"^BANK$")
 
 from main import (
     OTPStore,
@@ -17,6 +22,7 @@ from main import (
     create_app,
     extract_otp,
     generate_smsforwarder_signature,
+    validate_sms_allowlist,
     verify_smsforwarder_signature,
 )
 
@@ -119,6 +125,103 @@ class SmsForwarderSignatureTests(unittest.TestCase):
             verify_smsforwarder_signature(timestamp, quote_plus(independent), secret)
         )
         self.assertFalse(verify_smsforwarder_signature(timestamp, "wrong", secret))
+
+
+class OTPAllowlistTests(unittest.TestCase):
+    def test_message_only_accepts_matching_body_from_any_sender(self):
+        message_regex = re.compile(r"玉山卡網路消費")
+
+        self.assertIsNone(
+            validate_sms_allowlist(
+                "玉山卡網路消費，交易驗證碼 338228",
+                "0911111111",
+                message_regex,
+                None,
+            )
+        )
+
+    def test_sender_only_accepts_matching_sender_regardless_of_body(self):
+        sender_regex = re.compile(r"^BANK$")
+
+        self.assertIsNone(
+            validate_sms_allowlist("unrelated body", "BANK", None, sender_regex)
+        )
+
+    def test_both_filters_require_both_matches(self):
+        message_regex = re.compile(r"玉山卡網路消費")
+        sender_regex = re.compile(r"^BANK$")
+
+        self.assertEqual(
+            validate_sms_allowlist(
+                "玉山卡網路消費，交易驗證碼 338228",
+                "OTHER",
+                message_regex,
+                sender_regex,
+            ),
+            "sender_not_allowed",
+        )
+
+    def test_message_failure_returns_message_rejection_reason(self):
+        self.assertEqual(
+            validate_sms_allowlist(
+                "一般通知",
+                "BANK",
+                re.compile(r"玉山卡網路消費"),
+                re.compile(r"^BANK$"),
+            ),
+            "message_not_allowed",
+        )
+
+
+class OTPConfigurationTests(unittest.TestCase):
+    def _settings(self, **overrides):
+        values = {
+            "upload_token": "upload-token",
+            "consumer_token": "consumer-token",
+            "smsforwarder_secret": "smsforwarder-secret",
+        }
+        values.update(overrides)
+        return ServerSettings(**values)
+
+    def test_from_env_loads_message_allowlist_pattern(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OTP_ALLOWED_MESSAGE_PATTERN": r"玉山卡網路消費",
+                "OTP_ALLOWED_SENDER_PATTERN": "",
+            },
+            clear=False,
+        ):
+            settings = ServerSettings.from_env()
+
+        self.assertEqual(settings.allowed_message_pattern, r"玉山卡網路消費")
+        self.assertEqual(settings.allowed_sender_pattern, "")
+
+    def test_create_app_requires_at_least_one_sms_allowlist(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"At least one SMS allowlist must be configured: "
+            r"OTP_ALLOWED_MESSAGE_PATTERN or OTP_ALLOWED_SENDER_PATTERN",
+        ):
+            create_app(self._settings())
+
+    def test_create_app_rejects_invalid_message_regex(self):
+        with self.assertRaisesRegex(ValueError, "OTP_ALLOWED_MESSAGE_PATTERN"):
+            create_app(
+                self._settings(
+                    allowed_message_pattern="[",
+                    allowed_sender_pattern="",
+                )
+            )
+
+    def test_create_app_rejects_invalid_sender_regex(self):
+        with self.assertRaisesRegex(ValueError, "OTP_ALLOWED_SENDER_PATTERN"):
+            create_app(
+                self._settings(
+                    allowed_message_pattern="",
+                    allowed_sender_pattern="[",
+                )
+            )
 
 
 class OTPApiIntegrationTests(unittest.TestCase):
@@ -326,6 +429,213 @@ class OTPApiIntegrationTests(unittest.TestCase):
         self.assertFalse(waiter.is_alive())
         self.assertEqual(result["response"].status_code, 200)
         self.assertEqual(result["response"].json()["code"], "246810")
+
+
+class MessageAllowlistApiIntegrationTests(unittest.TestCase):
+    smsforwarder_secret = "message-filter-secret"
+    message_pattern = (
+        r"(?s)(?=.*?玉山卡網路消費)(?=.*網頁識別碼)"
+        r"(?=.*交易驗證碼\s*[:：]?\s*\d{6})"
+    )
+    valid_message = (
+        "玉山卡網路消費，新台幣 TWD 137 元，"
+        "網頁識別碼 WDCT，交易驗證碼 338228"
+    )
+    timestamp_sequence = 0
+
+    @classmethod
+    def setUpClass(cls):
+        settings = ServerSettings(
+            upload_token="upload-secret-token",
+            consumer_token="consumer-secret-token",
+            smsforwarder_secret=cls.smsforwarder_secret,
+            otp_ttl_seconds=300,
+            max_long_poll_seconds=2,
+            smsforwarder_max_skew_seconds=300,
+            allowed_message_pattern=cls.message_pattern,
+            allowed_sender_pattern="",
+        )
+        app = create_app(settings=settings)
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            cls.port = sock.getsockname()[1]
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
+        cls.server = uvicorn.Server(
+            uvicorn.Config(app, host="127.0.0.1", port=cls.port, log_level="critical")
+        )
+        cls.thread = threading.Thread(target=cls.server.run, daemon=True)
+        cls.thread.start()
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            try:
+                if requests.get(cls.base_url + "/health", timeout=0.2).status_code == 200:
+                    return
+            except requests.RequestException:
+                time.sleep(0.05)
+        raise RuntimeError("message allowlist test API server did not start")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.should_exit = True
+        cls.thread.join(timeout=5)
+
+    @classmethod
+    def fresh_timestamp_ms(cls):
+        cls.timestamp_sequence += 1
+        return str(int(time.time() * 1000) + cls.timestamp_sequence)
+
+    def post_smsforwarder(
+        self,
+        *,
+        timestamp_ms=None,
+        sender="0911111111",
+        content=None,
+        org_content=None,
+        signature=None,
+        as_json=False,
+    ):
+        timestamp_ms = timestamp_ms or self.fresh_timestamp_ms()
+        signature = signature or generate_smsforwarder_signature(
+            timestamp_ms, self.smsforwarder_secret
+        )
+        payload = {
+            "from": sender,
+            "content": content if content is not None else self.valid_message,
+            "timestamp": timestamp_ms,
+            "sign": quote_plus(signature) if as_json else signature,
+        }
+        if org_content is not None:
+            payload["org_content"] = org_content
+        kwargs = {"json": payload} if as_json else {"data": payload}
+        return requests.post(
+            self.base_url + "/api/v1/smsforwarder", timeout=2, **kwargs
+        )
+
+    def consume(self, not_before, timeout=0):
+        return requests.get(
+            self.base_url + "/api/v1/otp/next",
+            params={"not_before": not_before, "timeout": timeout},
+            headers={"X-OTP-Token": "consumer-secret-token"},
+            timeout=timeout + 2,
+        )
+
+    def test_valid_esun_message_accepts_different_senders(self):
+        not_before = time.time() - 1
+
+        first = self.post_smsforwarder(sender="0911111111")
+        second = self.post_smsforwarder(sender="0922222222")
+
+        self.assertEqual(first.status_code, 202, first.text)
+        self.assertEqual(second.status_code, 202, second.text)
+        consumed = [self.consume(not_before), self.consume(not_before)]
+        self.assertEqual([response.status_code for response in consumed], [200, 200])
+        self.assertEqual({response.json()["code"] for response in consumed}, {"338228"})
+        self.assertEqual(
+            {response.json()["identifier"] for response in consumed}, {"WDCT"}
+        )
+        self.assertEqual({response.json()["amount"] for response in consumed}, {"137"})
+
+    def test_org_content_is_the_message_used_for_allowlist_and_parser(self):
+        response = self.post_smsforwarder(
+            content="模板加工內容：一般通知 123456",
+            org_content=self.valid_message,
+            as_json=True,
+        )
+
+        self.assertEqual(response.status_code, 202, response.text)
+        consumed = self.consume(time.time() - 1)
+        self.assertEqual(consumed.status_code, 200)
+        self.assertEqual(consumed.json()["code"], "338228")
+
+    def test_unrelated_sms_is_rejected_by_message_allowlist(self):
+        response = self.post_smsforwarder(content="一般通知 123456")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"], "SMS content is not allowed")
+
+    def test_generic_otp_sms_is_rejected_by_message_allowlist(self):
+        response = self.post_smsforwarder(content="OTP 246810")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"], "SMS content is not allowed")
+
+    def test_invalid_signature_is_rejected_before_message_allowlist(self):
+        response = self.post_smsforwarder(
+            content=self.valid_message,
+            signature="invalid-signature",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_expired_timestamp_is_rejected_before_message_allowlist(self):
+        timestamp_ms = str(int((time.time() - 301) * 1000))
+        response = self.post_smsforwarder(
+            timestamp_ms=timestamp_ms,
+            content=self.valid_message,
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+
+class BothAllowlistApiIntegrationTests(unittest.TestCase):
+    smsforwarder_secret = "both-filter-secret"
+    message = (
+        "玉山卡網路消費，新台幣 TWD 137 元，"
+        "網頁識別碼 WDCT，交易驗證碼 338228"
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        settings = ServerSettings(
+            upload_token="upload-secret-token",
+            consumer_token="consumer-secret-token",
+            smsforwarder_secret=cls.smsforwarder_secret,
+            otp_ttl_seconds=300,
+            max_long_poll_seconds=2,
+            smsforwarder_max_skew_seconds=300,
+            allowed_message_pattern=r"玉山卡網路消費",
+            allowed_sender_pattern=r"^BANK$",
+        )
+        app = create_app(settings=settings)
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            cls.port = sock.getsockname()[1]
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
+        cls.server = uvicorn.Server(
+            uvicorn.Config(app, host="127.0.0.1", port=cls.port, log_level="critical")
+        )
+        cls.thread = threading.Thread(target=cls.server.run, daemon=True)
+        cls.thread.start()
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            try:
+                if requests.get(cls.base_url + "/health", timeout=0.2).status_code == 200:
+                    return
+            except requests.RequestException:
+                time.sleep(0.05)
+        raise RuntimeError("both allowlists test API server did not start")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.should_exit = True
+        cls.thread.join(timeout=5)
+
+    def test_sender_filter_rejects_other_sender_when_message_matches(self):
+        timestamp_ms = str(int(time.time() * 1000))
+        signature = generate_smsforwarder_signature(timestamp_ms, self.smsforwarder_secret)
+        response = requests.post(
+            self.base_url + "/api/v1/smsforwarder",
+            data={
+                "from": "OTHER",
+                "content": self.message,
+                "timestamp": timestamp_ms,
+                "sign": signature,
+            },
+            timeout=2,
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"], "Sender is not allowed")
 
 
 if __name__ == "__main__":

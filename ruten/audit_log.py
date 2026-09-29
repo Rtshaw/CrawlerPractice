@@ -40,6 +40,7 @@ _ALLOWED_FIELD_NAMES = {
     "max_long_poll_seconds",
     "smsforwarder_max_skew_seconds",
     "sender_filter_configured",
+    "message_length",
     "consumer_configured",
 }
 _SENSITIVE_FIELD_NAMES = {
