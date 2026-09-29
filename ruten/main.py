@@ -21,7 +21,7 @@ import threading
 import time
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Pattern
 from urllib.parse import parse_qs, unquote
 from uuid import uuid4
 
@@ -53,6 +53,20 @@ class ParsedOTPEvent:
     code: str
     identifier: Optional[str] = None
     amount: Optional[str] = None
+
+
+def validate_sms_allowlist(
+    message: str,
+    sender: str,
+    message_regex: Optional[Pattern[str]],
+    sender_regex: Optional[Pattern[str]],
+) -> Optional[str]:
+    """Return the first configured SMS allowlist rejection reason, if any."""
+    if message_regex is not None and not message_regex.search(message):
+        return "message_not_allowed"
+    if sender_regex is not None and not sender_regex.search(sender):
+        return "sender_not_allowed"
+    return None
 
 
 def extract_otp(message: str) -> Optional[str]:
@@ -156,6 +170,7 @@ class ServerSettings:
     otp_ttl_seconds: int = 300
     max_long_poll_seconds: int = 30
     smsforwarder_max_skew_seconds: int = 300
+    allowed_message_pattern: str = ""
     allowed_sender_pattern: str = ""
 
     @classmethod
@@ -169,6 +184,7 @@ class ServerSettings:
             smsforwarder_max_skew_seconds=int(
                 os.environ.get("SMSFORWARDER_MAX_SKEW_SECONDS", "300")
             ),
+            allowed_message_pattern=os.environ.get("OTP_ALLOWED_MESSAGE_PATTERN", ""),
             allowed_sender_pattern=os.environ.get("OTP_ALLOWED_SENDER_PATTERN", ""),
         )
 
@@ -302,6 +318,15 @@ class TokenAuthorizer:
         self._check(token, self.settings.consumer_token, "Consumer")
 
 
+def _compile_allowlist_pattern(pattern: str, environment_name: str) -> Optional[Pattern[str]]:
+    if not pattern:
+        return None
+    try:
+        return re.compile(pattern, re.IGNORECASE)
+    except re.error as exc:
+        raise ValueError(f"{environment_name} is invalid: {exc}") from exc
+
+
 def create_app(
     settings: Optional[ServerSettings] = None,
     store: Optional[OTPStore] = None,
@@ -310,7 +335,19 @@ def create_app(
     settings = settings or ServerSettings.from_env()
     store = store or OTPStore(settings.otp_ttl_seconds)
     auth = TokenAuthorizer(settings)
-    sender_regex = re.compile(settings.allowed_sender_pattern, re.IGNORECASE) if settings.allowed_sender_pattern else None
+    message_regex = _compile_allowlist_pattern(
+        settings.allowed_message_pattern,
+        "OTP_ALLOWED_MESSAGE_PATTERN",
+    )
+    sender_regex = _compile_allowlist_pattern(
+        settings.allowed_sender_pattern,
+        "OTP_ALLOWED_SENDER_PATTERN",
+    )
+    if message_regex is None and sender_regex is None:
+        raise ValueError(
+            "At least one SMS allowlist must be configured: "
+            "OTP_ALLOWED_MESSAGE_PATTERN or OTP_ALLOWED_SENDER_PATTERN"
+        )
     audit_logger = audit_logger or configure_audit_logger_from_env()
 
     application = FastAPI(title="Ruten OTP Relay", version="1.0.0")

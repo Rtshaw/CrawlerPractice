@@ -1,14 +1,19 @@
 import base64
 import hashlib
 import hmac
+import os
+import re
 import socket
 import threading
 import time
 import unittest
 from urllib.parse import quote_plus
+from unittest.mock import patch
 
 import requests
 import uvicorn
+
+os.environ.setdefault("OTP_ALLOWED_SENDER_PATTERN", r"^BANK$")
 
 from main import (
     OTPStore,
@@ -17,6 +22,7 @@ from main import (
     create_app,
     extract_otp,
     generate_smsforwarder_signature,
+    validate_sms_allowlist,
     verify_smsforwarder_signature,
 )
 
@@ -119,6 +125,103 @@ class SmsForwarderSignatureTests(unittest.TestCase):
             verify_smsforwarder_signature(timestamp, quote_plus(independent), secret)
         )
         self.assertFalse(verify_smsforwarder_signature(timestamp, "wrong", secret))
+
+
+class OTPAllowlistTests(unittest.TestCase):
+    def test_message_only_accepts_matching_body_from_any_sender(self):
+        message_regex = re.compile(r"玉山卡網路消費")
+
+        self.assertIsNone(
+            validate_sms_allowlist(
+                "玉山卡網路消費，交易驗證碼 338228",
+                "0911111111",
+                message_regex,
+                None,
+            )
+        )
+
+    def test_sender_only_accepts_matching_sender_regardless_of_body(self):
+        sender_regex = re.compile(r"^BANK$")
+
+        self.assertIsNone(
+            validate_sms_allowlist("unrelated body", "BANK", None, sender_regex)
+        )
+
+    def test_both_filters_require_both_matches(self):
+        message_regex = re.compile(r"玉山卡網路消費")
+        sender_regex = re.compile(r"^BANK$")
+
+        self.assertEqual(
+            validate_sms_allowlist(
+                "玉山卡網路消費，交易驗證碼 338228",
+                "OTHER",
+                message_regex,
+                sender_regex,
+            ),
+            "sender_not_allowed",
+        )
+
+    def test_message_failure_returns_message_rejection_reason(self):
+        self.assertEqual(
+            validate_sms_allowlist(
+                "一般通知",
+                "BANK",
+                re.compile(r"玉山卡網路消費"),
+                re.compile(r"^BANK$"),
+            ),
+            "message_not_allowed",
+        )
+
+
+class OTPConfigurationTests(unittest.TestCase):
+    def _settings(self, **overrides):
+        values = {
+            "upload_token": "upload-token",
+            "consumer_token": "consumer-token",
+            "smsforwarder_secret": "smsforwarder-secret",
+        }
+        values.update(overrides)
+        return ServerSettings(**values)
+
+    def test_from_env_loads_message_allowlist_pattern(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OTP_ALLOWED_MESSAGE_PATTERN": r"玉山卡網路消費",
+                "OTP_ALLOWED_SENDER_PATTERN": "",
+            },
+            clear=False,
+        ):
+            settings = ServerSettings.from_env()
+
+        self.assertEqual(settings.allowed_message_pattern, r"玉山卡網路消費")
+        self.assertEqual(settings.allowed_sender_pattern, "")
+
+    def test_create_app_requires_at_least_one_sms_allowlist(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"At least one SMS allowlist must be configured: "
+            r"OTP_ALLOWED_MESSAGE_PATTERN or OTP_ALLOWED_SENDER_PATTERN",
+        ):
+            create_app(self._settings())
+
+    def test_create_app_rejects_invalid_message_regex(self):
+        with self.assertRaisesRegex(ValueError, "OTP_ALLOWED_MESSAGE_PATTERN"):
+            create_app(
+                self._settings(
+                    allowed_message_pattern="[",
+                    allowed_sender_pattern="",
+                )
+            )
+
+    def test_create_app_rejects_invalid_sender_regex(self):
+        with self.assertRaisesRegex(ValueError, "OTP_ALLOWED_SENDER_PATTERN"):
+            create_app(
+                self._settings(
+                    allowed_message_pattern="",
+                    allowed_sender_pattern="[",
+                )
+            )
 
 
 class OTPApiIntegrationTests(unittest.TestCase):
