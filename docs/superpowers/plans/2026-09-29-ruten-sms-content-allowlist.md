@@ -50,7 +50,7 @@
 
 - [ ] **Step 2: Run the focused tests and verify the expected RED failure**
 
-  Run: `C:\Users\casey\.pyenv\pyenv-win\versions\3.11.9\python.exe -m unittest ruten.tests.test_otp_server.OTPAllowlistTests -v` from the repository root.
+  Run from `ruten/`: `C:\Users\casey\.pyenv\pyenv-win\versions\3.11.9\python.exe -m unittest tests.test_otp_server.OTPAllowlistTests -v`.
 
   Expected: test discovery/import fails because `validate_sms_allowlist` and `OTPAllowlistTests` do not yet exist; fix only test setup errors until the failure is specifically about the missing production behavior.
 
@@ -68,7 +68,7 @@
 
 - [ ] **Step 6: Run the startup tests and verify RED**
 
-  Run: `C:\Users\casey\.pyenv\pyenv-win\versions\3.11.9\python.exe -m unittest ruten.tests.test_otp_server.OTPConfigurationTests -v`.
+  Run from `ruten/`: `C:\Users\casey\.pyenv\pyenv-win\versions\3.11.9\python.exe -m unittest tests.test_otp_server.OTPConfigurationTests -v`.
 
   Expected: the new tests fail because the new setting is not loaded and startup validation is not implemented.
 
@@ -105,7 +105,7 @@
 
 - [ ] **Step 2: Run the new integration tests and verify RED**
 
-  Run: `C:\Users\casey\.pyenv\pyenv-win\versions\3.11.9\python.exe -m unittest ruten.tests.test_otp_server.MessageAllowlistApiIntegrationTests -v`.
+  Run from `ruten/`: `C:\Users\casey\.pyenv\pyenv-win\versions\3.11.9\python.exe -m unittest tests.test_otp_server.MessageAllowlistApiIntegrationTests -v`.
 
   Expected: the configured message-only server currently accepts unrelated bodies or the new test class cannot find the expected rejection behavior; the failure must be attributable to missing allowlist enforcement.
 
@@ -127,7 +127,7 @@
 
 - [ ] **Step 7: Run the existing OTP server suite**
 
-  Run: `C:\Users\casey\.pyenv\pyenv-win\versions\3.11.9\python.exe -m unittest ruten.tests.test_otp_server -v`.
+  Run from `ruten/`: `C:\Users\casey\.pyenv\pyenv-win\versions\3.11.9\python.exe -m unittest tests.test_otp_server -v`.
 
   Expected: all legacy sender-only, HMAC, timestamp, parser, replay, TTL, consume-once, correlation, and long-poll tests pass.
 
@@ -156,7 +156,7 @@
 
 - [ ] **Step 2: Run the focused audit tests and verify RED**
 
-  Run: `C:\Users\casey\.pyenv\pyenv-win\versions\3.11.9\python.exe -m unittest ruten.tests.test_audit_integration -v`.
+  Run from `ruten/`: `C:\Users\casey\.pyenv\pyenv-win\versions\3.11.9\python.exe -m unittest tests.test_audit_integration -v`.
 
   Expected: the new health fields, message rejection reason, or sanitized message length are missing.
 
