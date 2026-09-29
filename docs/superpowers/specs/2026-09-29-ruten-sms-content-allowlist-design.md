@@ -38,8 +38,8 @@
 def validate_sms_allowlist(
     message: str,
     sender: str,
-    message_regex: Pattern[str] | None,
-    sender_regex: Pattern[str] | None,
+    message_regex: Optional[Pattern[str]],
+    sender_regex: Optional[Pattern[str]],
 ) -> None:
 ```
 
