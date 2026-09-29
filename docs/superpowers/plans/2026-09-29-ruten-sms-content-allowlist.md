@@ -4,9 +4,9 @@
 
 **Goal:** Add a startup-validated SMS body allowlist for the Ruten OTP relay while preserving optional sender filtering and all existing OTP security controls.
 
-**Architecture:** Compile both allowlist regexes once in `create_app()`, expose a small pure `validate_sms_allowlist()` helper, and apply it to both inbound SMS endpoints. Run the production app through `uvicorn main:create_app --factory` so configuration validation occurs at server startup without import-time side effects in tests.
+**Architecture:** Compile both allowlist regexes once in `create_app()`, expose a small pure `validate_sms_allowlist()` helper, and apply it only to the SmsForwarder webhook. Preserve the current `app = create_app()` and `uvicorn main:app` startup model; test modules seed a sender-only environment value before importing `main`.
 
-**Tech Stack:** Python 3.9+, FastAPI 0.115.4, Pydantic 2.9.2, Uvicorn 0.32.0, `unittest`, real local Uvicorn integration tests, Docker Compose.
+**Tech Stack:** Docker Python 3.11.10, FastAPI 0.115.4, Pydantic 2.9.2, Uvicorn 0.32.0, `unittest`, real local Uvicorn integration tests, Docker Compose.
 
 **Spec:** `docs/superpowers/specs/2026-09-29-ruten-sms-content-allowlist-design.md`
 
@@ -21,6 +21,8 @@
 - Never write OTP, full SMS body, full sender, secrets, tokens, signatures, amount, or identifier to audit logs.
 - `smsforwarder_configured` is true only when `SMSFORWARDER_SECRET` and at least one allowlist are configured.
 - Compose must allow either allowlist variable to be empty and must not make either one individually required.
+- The new message allowlist applies only to `/api/v1/smsforwarder`; `/api/v1/otp` remains governed by its existing `OTP_UPLOAD_TOKEN`, sender, and parser behavior.
+- Keep `app = create_app()` and `uvicorn main:app`; do not change the production startup model.
 - Do not modify `otp_client.py`, payment automation, or the Taiwan-side OTP polling protocol.
 
 ## Review Focus
@@ -29,7 +31,7 @@
 - Allowlist precedence: invalid HMAC or stale timestamp must return 401 before a body rejection; pin in Task 2's webhook integration tests.
 - Configuration boundaries: message-only, sender-only, both, neither, and invalid regexes must have distinct startup/HTTP behavior; pin in Task 1 and Task 2.
 - Audit privacy: message rejection may expose only lengths/fingerprints and must redact OTP/body/sender/signature; pin in Task 3's audit integration test.
-- Factory startup behavior: importing `main` must remain usable for unit tests while Uvicorn startup invokes `create_app()` and fails on invalid configuration; pin in Task 4's import/compile verification and startup tests.
+- Global app startup behavior: production still imports `main:app` and fails on invalid configuration; test modules set a sender-only environment value before importing `main`; pin in Task 1's test setup and configuration tests.
 
 ### Task 1: Add pure allowlist validation and startup configuration checks
 
@@ -44,7 +46,7 @@
 
 - [ ] **Step 1: Write failing unit tests for allowlist outcomes**
 
-  Add tests that assert message-only accepts a matching body from any sender, sender-only accepts a matching sender, both filters require both matches, message failure returns `message_not_allowed`, and sender failure returns `sender_not_allowed`.
+  Before importing `main` in `test_otp_server.py` and `test_audit_integration.py`, set `os.environ.setdefault("OTP_ALLOWED_SENDER_PATTERN", "^BANK$")` so the retained global `app = create_app()` can initialize during test collection. Add tests that assert message-only accepts a matching body from any sender, sender-only accepts a matching sender, both filters require both matches, message failure returns `message_not_allowed`, and sender failure returns `sender_not_allowed`.
 
 - [ ] **Step 2: Run the focused tests and verify the expected RED failure**
 
@@ -72,7 +74,7 @@
 
 - [ ] **Step 7: Implement settings loading and initialization validation**
 
-  Add `allowed_message_pattern` to `ServerSettings.from_env()`. In `create_app()`, compile non-empty patterns once with `re.IGNORECASE`, wrap `re.error` as `ValueError` with the corresponding environment variable name, and reject the both-empty case using the exact spec message. Keep the compiled regexes local to the app closure and use them for both inbound endpoints.
+  Add `allowed_message_pattern` to `ServerSettings.from_env()`. In `create_app()`, compile non-empty patterns once with `re.IGNORECASE`, wrap `re.error` as `ValueError` with the corresponding environment variable name, and reject the both-empty case using the exact spec message. Keep the compiled regexes local to the app closure and use them for the SmsForwarder webhook path.
 
 - [ ] **Step 8: Run the focused configuration tests and verify GREEN**
 
@@ -85,7 +87,7 @@
   git commit -m "feat: add SMS allowlist configuration validation"
   ```
 
-### Task 2: Enforce message/sender allowlists in webhook and manual ingress
+### Task 2: Enforce message/sender allowlists in the SmsForwarder webhook
 
 **Files:**
 - Modify: `ruten/main.py`
@@ -95,6 +97,7 @@
 - Consumes Task 1's compiled regexes and `validate_sms_allowlist()` result strings.
 - Produces HTTP 422 `SMS content is not allowed` with rejection reason `message_not_allowed`.
 - Preserves HTTP 422 `Sender is not allowed` with rejection reason `sender_not_allowed`.
+- Leaves `/api/v1/otp` unchanged; it continues using only its existing upload auth, sender, and parser behavior.
 
 - [ ] **Step 1: Write failing integration tests for message-only and original-body matching**
 
@@ -116,7 +119,7 @@
 
 - [ ] **Step 5: Implement allowlist enforcement at the correct point**
 
-  After required fields, timestamp freshness, and HMAC verification, call `validate_sms_allowlist()` before constructing/storing the OTP payload. Map its result to the specified HTTP detail and rejection reason. Apply the same helper to `/api/v1/otp` after upload auth while preserving its existing token, duplicate, and parser responses.
+  After required fields, timestamp freshness, and HMAC verification in `/api/v1/smsforwarder`, call `validate_sms_allowlist()` before constructing/storing the OTP payload. Map its result to the specified HTTP detail and rejection reason. Do not call the helper from `/api/v1/otp`; preserve that endpoint's existing behavior.
 
 - [ ] **Step 6: Run the focused integration tests and verify GREEN**
 
@@ -172,37 +175,32 @@
   git commit -m "feat: audit SMS allowlist rejections"
   ```
 
-### Task 4: Update app factory startup, Compose, examples, and deployment documentation
+### Task 4: Update Compose, examples, and deployment documentation
 
 **Files:**
-- Modify: `ruten/main.py`
-- Modify: `ruten/docker/Dockerfile`
 - Modify: `ruten/docker/compose.yml`
 - Modify: `ruten/.env.example`
 - Modify: `ruten/docker/.env.example`
 - Modify: `ruten/README.md`
 - Modify: `ruten/docker/README.md`
 - Modify: `ruten/SESSION_HANDOFF.md`
-- Test: `ruten/tests/test_otp_server.py`
-
 **Interfaces:**
-- Production command becomes `uvicorn main:create_app --factory`.
 - Compose passes `OTP_ALLOWED_MESSAGE_PATTERN` and `OTP_ALLOWED_SENDER_PATTERN` with `:-` empty defaults, leaving OR validation to app startup.
-- Documentation names message filter as primary, sender filter as optional secondary, includes the ESUN regex and migration/recreate steps.
+- Documentation names message filter as primary, sender filter as optional secondary, includes the ESUN regex and migration/recreate steps, and retains `uvicorn main:app`.
 
-- [ ] **Step 1: Write failing factory and configuration verification checks**
+- [ ] **Step 1: Write failing Compose/documentation verification checks**
 
-  Add `OTPFactoryTests` asserting that importing `main` does not instantiate a configuration-dependent global app and that `create_app` remains callable as the Uvicorn factory. Add shell-level checks that the Compose file no longer contains `:?OTP_ALLOWED_*_PATTERN` for either allowlist and that both example env files contain the ESUN message pattern plus an optional empty sender pattern.
+  Add shell-level checks that the Compose file no longer contains `:?OTP_ALLOWED_*_PATTERN` for either allowlist, that both example env files contain the ESUN message pattern plus an optional empty sender pattern, and that all deployment docs retain `uvicorn main:app` while documenting message-primary/sender-optional behavior.
 
 - [ ] **Step 2: Run the checks and verify RED**
 
-  Run: `C:\Users\casey\.pyenv\pyenv-win\versions\3.11.9\python.exe -m unittest ruten.tests.test_otp_server.OTPFactoryTests -v` plus `rg -n "OTP_ALLOWED_(MESSAGE|SENDER)_PATTERN:\?" ruten/docker/compose.yml ruten/.env.example ruten/docker/.env.example`.
+  Run: `rg -n "OTP_ALLOWED_(MESSAGE|SENDER)_PATTERN:\?" ruten/docker/compose.yml ruten/.env.example ruten/docker/.env.example` plus `rg -n "main:app|OTP_ALLOWED_MESSAGE_PATTERN|OTP_ALLOWED_SENDER_PATTERN" ruten/README.md ruten/docker/README.md ruten/SESSION_HANDOFF.md`.
 
-  Expected: the existing global app and old Compose requirement/example content cause the new checks to fail.
+  Expected: the old Compose requirement and example/documentation content cause the new checks to fail; `main:app` remains present and is not removed.
 
-- [ ] **Step 3: Implement the factory and deployment configuration changes**
+- [ ] **Step 3: Implement the deployment configuration changes**
 
-  Remove the import-time `app = create_app()` object, update direct execution to call `create_app()`, change the Docker CMD to `main:create_app --factory`, and update all command snippets accordingly. Make both Compose allowlist variables optional with `:-`. Add the exact ESUN regex and migration instructions to both env examples and all three deployment documents, including `docker compose config` and container recreate/restart guidance.
+  Make both Compose allowlist variables optional with `:-`. Add the exact ESUN regex and migration instructions to both env examples and all three deployment documents, including the unchanged `uvicorn main:app` startup model, `docker compose config`, and container recreate/restart guidance. Do not modify Dockerfile or production startup commands.
 
 - [ ] **Step 4: Run configuration and syntax verification**
 
@@ -218,7 +216,7 @@
 - [ ] **Step 5: Commit the completed task**
 
   ```text
-  git add ruten/main.py ruten/docker/Dockerfile ruten/docker/compose.yml ruten/.env.example ruten/docker/.env.example ruten/README.md ruten/docker/README.md ruten/SESSION_HANDOFF.md ruten/tests/test_otp_server.py
+  git add ruten/docker/compose.yml ruten/.env.example ruten/docker/.env.example ruten/README.md ruten/docker/README.md ruten/SESSION_HANDOFF.md
   git commit -m "docs: document SMS content based relay deployment"
   ```
 

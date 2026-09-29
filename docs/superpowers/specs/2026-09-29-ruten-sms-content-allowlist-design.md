@@ -2,6 +2,7 @@
 
 **日期：** 2026-09-29  
 **範圍：** `ruten/` OTP relay、Docker deployment、測試與部署文件
+**Runtime：** Docker image `python:3.11.10-slim-bookworm`
 
 ## 目標
 
@@ -45,13 +46,13 @@ def validate_sms_allowlist(
 
 helper 成功時不回傳值；失敗時 raise 可映射到 HTTP 422 與 audit reason 的明確例外或回傳明確 rejection reason。message 檢查先於 sender 檢查，兩者都配置時必須同時通過。
 
-同一 allowlist helper 會套用到 SmsForwarder webhook 與既有手動 JSON upload ingress；sender-only 設定不會改變手動 upload 的既有結果。Webhook rejection 必須保留本 spec 指定的 audit event；手動 upload 維持既有 token/auth 與 response contract。
+allowlist helper 只套用到 SmsForwarder webhook。既有手動 JSON upload ingress `/api/v1/otp` 維持原本的 `OTP_UPLOAD_TOKEN`、sender 與 parser 行為，不納入本次 message allowlist 變更。Webhook rejection 必須保留本 spec 指定的 audit event。
 
-### 2. 使用 app factory 觸發 startup validation
+### 2. 保留現有 global app 啟動模型
 
-移除 module import 時無條件建立的 global app，改由 `uvicorn main:create_app --factory` 建立應用程式。這使測試可匯入 parser、store 與 helper，而實際 Uvicorn startup 仍會在沒有 allowlist 或 regex 無效時 fail-fast。
+保留 `app = create_app()` 與 `uvicorn main:app`。`create_app()` 初始化時集中編譯 message/sender regex，並在兩者皆空或 regex 無效時 fail-fast。測試模組在匯入 `main` 前設定明確的 sender-only 測試環境值，避免 global app 建立阻礙測試收集；production startup model 不變。
 
-Dockerfile command、`main.py` 執行說明、README 與 deployment handoff 會同步改為 app factory 方式。
+本次不修改 Dockerfile command 或 Uvicorn startup model。
 
 ### 3. Health semantics
 
@@ -121,7 +122,6 @@ python -m py_compile fee.py main.py otp_client.py scheduled_run.py sms.py
 
 - Modify: `ruten/main.py`
 - Modify: `ruten/audit_log.py`
-- Modify: `ruten/docker/Dockerfile`
 - Modify: `ruten/docker/compose.yml`
 - Modify: `ruten/.env.example`
 - Modify: `ruten/docker/.env.example`
