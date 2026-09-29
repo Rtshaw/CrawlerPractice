@@ -32,6 +32,7 @@ class AuditApiIntegrationTests(unittest.TestCase):
             otp_ttl_seconds=300,
             max_long_poll_seconds=2,
             smsforwarder_max_skew_seconds=300,
+            allowed_message_pattern=r"^銀行 OTP",
             allowed_sender_pattern=r"^BANK$",
         )
         self.app = create_app(settings=settings, audit_logger=self.audit_logger)
@@ -141,6 +142,91 @@ class AuditApiIntegrationTests(unittest.TestCase):
         log_text = self.audit_path.read_text(encoding="utf-8")
         self.assertNotIn("OTHER", log_text)
         self.assertNotIn("135790", log_text)
+
+    def test_audit_records_message_rejection_without_message_or_otp(self):
+        timestamp = str(int(time.time() * 1000))
+        message = "一般通知 135790"
+        signature = generate_smsforwarder_signature(
+            timestamp, "smsforwarder-official-secret"
+        )
+        response = requests.post(
+            self.base_url + "/api/v1/smsforwarder",
+            data={
+                "from": "BANK",
+                "content": message,
+                "timestamp": timestamp,
+                "sign": signature,
+            },
+            timeout=2,
+        )
+        self.assertEqual(response.status_code, 422)
+
+        records = [
+            json.loads(line)
+            for line in self.audit_path.read_text(encoding="utf-8").splitlines()
+        ]
+        rejection = next(
+            record
+            for record in records
+            if record["event"] == "smsforwarder.rejected"
+            and record.get("reason") == "message_not_allowed"
+        )
+        self.assertEqual(rejection["status_code"], 422)
+        self.assertEqual(rejection["message_length"], len(message))
+        self.assertIn("sender_fingerprint", rejection)
+
+        log_text = self.audit_path.read_text(encoding="utf-8")
+        for sensitive_value in (message, "135790", "BANK", signature):
+            self.assertNotIn(sensitive_value, log_text)
+
+    def test_health_reports_sender_message_and_combined_filter_flags(self):
+        sender_only = ServerSettings(
+            upload_token="upload-secret-token",
+            consumer_token="consumer-secret-token",
+            smsforwarder_secret="smsforwarder-official-secret",
+            allowed_sender_pattern=r"^BANK$",
+        )
+        message_only = ServerSettings(
+            upload_token="upload-secret-token",
+            consumer_token="consumer-secret-token",
+            smsforwarder_secret="smsforwarder-official-secret",
+            allowed_message_pattern=r"玉山卡網路消費",
+        )
+        both = ServerSettings(
+            upload_token="upload-secret-token",
+            consumer_token="consumer-secret-token",
+            smsforwarder_secret="smsforwarder-official-secret",
+            allowed_message_pattern=r"玉山卡網路消費",
+            allowed_sender_pattern=r"^BANK$",
+        )
+
+        def health_for(settings):
+            app = create_app(settings=settings, audit_logger=self.audit_logger)
+            route = next(route for route in app.routes if route.path == "/health")
+            return route.endpoint()
+
+        sender_health = health_for(sender_only)
+        message_health = health_for(message_only)
+        both_health = health_for(both)
+
+        self.assertEqual(
+            (sender_health["smsforwarder_configured"],
+             sender_health["message_filter_configured"],
+             sender_health["sender_filter_configured"]),
+            (True, False, True),
+        )
+        self.assertEqual(
+            (message_health["smsforwarder_configured"],
+             message_health["message_filter_configured"],
+             message_health["sender_filter_configured"]),
+            (True, True, False),
+        )
+        self.assertEqual(
+            (both_health["smsforwarder_configured"],
+             both_health["message_filter_configured"],
+             both_health["sender_filter_configured"]),
+            (True, True, True),
+        )
 
 
 if __name__ == "__main__":

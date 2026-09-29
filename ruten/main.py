@@ -354,13 +354,15 @@ def create_app(
     application.state.settings = settings
     application.state.otp_store = store
     application.state.audit_logger = audit_logger
+    message_filter_configured = message_regex is not None
+    sender_filter_configured = sender_regex is not None
     audit_event(
         audit_logger,
         "relay.initialized",
         otp_ttl_seconds=settings.otp_ttl_seconds,
         max_long_poll_seconds=settings.max_long_poll_seconds,
         smsforwarder_max_skew_seconds=settings.smsforwarder_max_skew_seconds,
-        sender_filter_configured=sender_regex is not None,
+        sender_filter_configured=sender_filter_configured,
         consumer_configured=bool(settings.consumer_token),
     )
 
@@ -369,8 +371,11 @@ def create_app(
         return {
             "status": "ok",
             "upload_configured": bool(settings.upload_token),
-            "smsforwarder_configured": bool(settings.smsforwarder_secret),
+            "smsforwarder_configured": bool(settings.smsforwarder_secret)
+            and (message_filter_configured or sender_filter_configured),
             "consumer_configured": bool(settings.consumer_token),
+            "message_filter_configured": message_filter_configured,
+            "sender_filter_configured": sender_filter_configured,
         }
 
     @application.post(
