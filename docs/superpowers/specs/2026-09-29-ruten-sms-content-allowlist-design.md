@@ -21,7 +21,7 @@
   ```
 
 - 任一 regex 無效時，`create_app()` 立即失敗，不忽略設定、不接受所有 SMS。
-- Webhook 驗證順序為：parse payload、required fields、timestamp freshness、HMAC、allowlist、OTP parse/store。
+- Webhook 驗證順序為：parse payload、required fields、HMAC、timestamp freshness、allowlist、OTP parse/store。
 - message allowlist 不符合時回 HTTP 422，detail 為 `SMS content is not allowed`，audit reason 為 `message_not_allowed`。
 - sender allowlist 不符合時維持 HTTP 422 與 detail `Sender is not allowed`，audit reason 為 `sender_not_allowed`。
 - HMAC、timestamp、parser、TTL、replay 與 consumer authentication 的錯誤狀態與行為維持現況。

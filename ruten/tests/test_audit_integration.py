@@ -179,6 +179,31 @@ class AuditApiIntegrationTests(unittest.TestCase):
         for sensitive_value in (message, "135790", "BANK", signature):
             self.assertNotIn(sensitive_value, log_text)
 
+    def test_invalid_signature_is_checked_before_expired_timestamp(self):
+        timestamp = str(int((time.time() - 301) * 1000))
+        response = requests.post(
+            self.base_url + "/api/v1/smsforwarder",
+            data={
+                "from": "BANK",
+                "content": "銀行 OTP 246810",
+                "timestamp": timestamp,
+                "sign": "invalid-signature",
+            },
+            timeout=2,
+        )
+        self.assertEqual(response.status_code, 401)
+
+        records = [
+            json.loads(line)
+            for line in self.audit_path.read_text(encoding="utf-8").splitlines()
+        ]
+        rejection = next(
+            record
+            for record in records
+            if record["event"] == "smsforwarder.rejected"
+        )
+        self.assertEqual(rejection["reason"], "signature_invalid")
+
     def test_health_reports_sender_message_and_combined_filter_flags(self):
         sender_only = ServerSettings(
             upload_token="upload-secret-token",

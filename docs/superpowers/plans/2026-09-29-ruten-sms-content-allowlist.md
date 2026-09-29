@@ -16,7 +16,7 @@
 - `OTP_ALLOWED_MESSAGE_PATTERN` and `OTP_ALLOWED_SENDER_PATTERN` use AND semantics when both are configured.
 - At least one SMS allowlist must be configured; otherwise `create_app()` raises `ValueError` with the exact required message.
 - Invalid message or sender regexes fail at app initialization; never silently accept all messages.
-- SmsForwarder validation order remains timestamp freshness, HMAC, allowlist, then OTP parse/store.
+- SmsForwarder validation order is required fields, HMAC, timestamp freshness, allowlist, then OTP parse/store.
 - Preserve HMAC verification, timestamp freshness, OTP parsing, TTL, replay/deduplication, consumer authentication, long polling, and consume-once behavior.
 - Never write OTP, full SMS body, full sender, secrets, tokens, signatures, amount, or identifier to audit logs.
 - `smsforwarder_configured` is true only when `SMSFORWARDER_SECRET` and at least one allowlist are configured.
@@ -119,7 +119,7 @@
 
 - [ ] **Step 5: Implement allowlist enforcement at the correct point**
 
-  After required fields, timestamp freshness, and HMAC verification in `/api/v1/smsforwarder`, call `validate_sms_allowlist()` before constructing/storing the OTP payload. Map its result to the specified HTTP detail and rejection reason. Do not call the helper from `/api/v1/otp`; preserve that endpoint's existing behavior.
+  After required fields, HMAC verification, and timestamp freshness in `/api/v1/smsforwarder`, call `validate_sms_allowlist()` before constructing/storing the OTP payload. Map its result to the specified HTTP detail and rejection reason. Do not call the helper from `/api/v1/otp`; preserve that endpoint's existing behavior.
 
 - [ ] **Step 6: Run the focused integration tests and verify GREEN**
 

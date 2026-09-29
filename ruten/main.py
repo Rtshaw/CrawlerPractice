@@ -493,6 +493,17 @@ def create_app(
                 detail="timestamp must be Unix epoch milliseconds",
             ) from exc
 
+        if not verify_smsforwarder_signature(
+            timestamp_ms, signature, settings.smsforwarder_secret
+        ):
+            audit_event(
+                audit_logger,
+                "smsforwarder.rejected",
+                reason="signature_invalid",
+                status_code=401,
+                processing_ms=round((time.monotonic() - request_started) * 1000, 2),
+            )
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
         now = time.time()
         skew_seconds = abs(now - timestamp_value / 1000.0)
         if skew_seconds > settings.smsforwarder_max_skew_seconds:
@@ -505,17 +516,6 @@ def create_app(
                 processing_ms=round((time.monotonic() - request_started) * 1000, 2),
             )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Webhook timestamp expired")
-        if not verify_smsforwarder_signature(
-            timestamp_ms, signature, settings.smsforwarder_secret
-        ):
-            audit_event(
-                audit_logger,
-                "smsforwarder.rejected",
-                reason="signature_invalid",
-                status_code=401,
-                processing_ms=round((time.monotonic() - request_started) * 1000, 2),
-            )
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
         allowlist_rejection = validate_sms_allowlist(
             message,
             sender,
