@@ -58,8 +58,8 @@ docker compose logs --tail=100 relay
 ## Verify
 
 ```sh
-curl -I http://opt.yurishop.xyz/health
-curl -fsS https://opt.yurishop.xyz/health
+curl -I http://otp.example.com/health
+curl -fsS https://otp.example.com/health
 ```
 
 HTTP 應永久轉至 HTTPS；HTTPS JSON 的 `status` 應為 `ok`，且 `smsforwarder_configured`、`message_filter_configured`、`consumer_configured` 應為 `true`。`sender_filter_configured` 依是否保留 sender regex 決定。
@@ -100,13 +100,13 @@ grep -E '2026-09-08T02:4[0-3]|smsforwarder|otp.consume|relay.initialized' \
 SmsForwarder WebServer：
 
 ```text
-https://opt.yurishop.xyz/api/v1/smsforwarder
+https://otp.example.com/api/v1/smsforwarder
 ```
 
 台灣端 `fee.py` 使用：
 
 ```text
-OTP_SERVER_URL=https://opt.yurishop.xyz
+OTP_SERVER_URL=https://otp.example.com
 OTP_CONSUMER_TOKEN=<與VPS相同的consumer token>
 ```
 

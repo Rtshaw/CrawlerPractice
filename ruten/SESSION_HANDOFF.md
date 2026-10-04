@@ -24,7 +24,7 @@ Android SmsForwarder
 
 **不可在日本 VPS 執行 `fee.py`**，除非另有經授權的台灣出口。VPS 不放 `config.ini`、`cookies.json` 或信用卡資料。
 
-公開網域：`https://opt.yurishop.xyz`
+公開網域範例：`https://otp.example.com`
 
 ## 2. 已完成程式
 
@@ -82,7 +82,7 @@ SmsForwarder endpoint 支援：
 Webhook 發送通道：
 
 ```text
-WebServer: https://opt.yurishop.xyz/api/v1/smsforwarder
+WebServer: https://otp.example.com/api/v1/smsforwarder
 Method: POST
 Secret: 與 VPS SMSFORWARDER_SECRET 相同
 ```
@@ -125,7 +125,7 @@ Compose 特性：
 - UID/GID 10001 非 root、唯讀 root filesystem、`cap_drop: ALL`、`no-new-privileges`、`pids_limit: 100`。
 - 無 host port，只 `expose: 8000` 並連接既有 external Traefik network。
 - HTTP router 永久 redirect HTTPS。
-- HTTPS router 使用 `opt.yurishop.xyz`、websecure、TLS 與可設定 certificate resolver。
+- HTTPS router 使用 `OTP_DOMAIN`、websecure、TLS 與可設定 certificate resolver。
 - Docker JSON log rotation。
 
 VPS 部署：
@@ -154,7 +154,7 @@ OTP_ALLOWED_SENDER_PATTERN=
 SMSFORWARDER_MAX_SKEW_SECONDS=300
 OTP_TTL_SECONDS=300
 OTP_MAX_LONG_POLL_SECONDS=30
-OTP_DOMAIN=opt.yurishop.xyz
+OTP_DOMAIN=otp.example.com
 TRAEFIK_NETWORK=traefik
 TRAEFIK_HTTP_ENTRYPOINT=web
 TRAEFIK_HTTPS_ENTRYPOINT=websecure
@@ -166,8 +166,8 @@ TRAEFIK_CERTRESOLVER=letsencrypt
 驗證：
 
 ```sh
-curl -I http://opt.yurishop.xyz/health
-curl -fsS https://opt.yurishop.xyz/health
+curl -I http://otp.example.com/health
+curl -fsS https://otp.example.com/health
 ```
 
 HTTP 應轉 HTTPS；HTTPS 應回 `status: ok`，並且 `smsforwarder_configured`、`message_filter_configured`、`consumer_configured` 為 `true`。sender filter 若留空則 `sender_filter_configured` 為 `false`。
@@ -177,7 +177,7 @@ HTTP 應轉 HTTPS；HTTPS 應回 `status: ok`，並且 `smsforwarder_configured`
 台灣電腦設定：
 
 ```powershell
-$env:OTP_SERVER_URL = "https://opt.yurishop.xyz"
+$env:OTP_SERVER_URL = "https://otp.example.com"
 $env:OTP_CONSUMER_TOKEN = "<與VPS相同的consumer-token>"
 python fee.py
 ```
@@ -222,7 +222,7 @@ Start-ScheduledTask -TaskName RutenFeePayment
 ## 8. 下一個 Chat 建議先做
 
 1. 讀取本文件與 `docker/README.md`。
-2. 確認 `opt.yurishop.xyz` DNS 已指向日本 VPS。
+2. 確認 `OTP_DOMAIN` 指定的網域 DNS 已指向日本 VPS。
 3. 確認 VPS 現有 Traefik network、entrypoint、ACME resolver 實際名稱。
 4. 建立 `docker/.env` 並部署 relay。
 5. 用 HTTPS `/health` 驗證。

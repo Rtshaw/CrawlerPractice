@@ -35,7 +35,7 @@ Copy-Item config.example.ini config.ini  # 僅在尚無 config.ini 時
 在 `config.ini` 填入帳務與卡片欄位。relay URL/token 建議只放環境變數：
 
 ```powershell
-$env:OTP_SERVER_URL = "https://opt.yurishop.xyz"
+$env:OTP_SERVER_URL = "https://otp.example.com"
 $env:OTP_CONSUMER_TOKEN = "<consumer-token>"
 ```
 
@@ -47,7 +47,7 @@ $env:OTP_CONSUMER_TOKEN = "<consumer-token>"
 
 部署前確認：
 
-1. `opt.yurishop.xyz` 的 DNS A/AAAA 已指向 VPS。
+1. `otp.example.com` 的 DNS A/AAAA 已指向 VPS。
 2. VPS 防火牆允許 Traefik 使用的 `80/tcp`、`443/tcp`。
 3. Traefik 已有 Docker provider、HTTP/HTTPS entrypoint 與 ACME resolver。
 4. 找出 Traefik external network 與 resolver 名稱：`docker network ls` 及 Traefik static config。
@@ -79,8 +79,8 @@ Relay 的歷史 audit log 會持久化在 `docker/runtime/logs/audit.jsonl*`；D
 驗證 HTTP 強制轉址與 HTTPS 健康檢查：
 
 ```sh
-curl -I http://opt.yurishop.xyz/health
-curl -fsS https://opt.yurishop.xyz/health
+curl -I http://otp.example.com/health
+curl -fsS https://otp.example.com/health
 ```
 
 第一個請求應 redirect 至 HTTPS；第二個應回傳 `status: ok`，且 `smsforwarder_configured`、`message_filter_configured`、`consumer_configured` 都是 `true`。`sender_filter_configured` 只有在保留 sender regex 時才是 `true`。若既有 Traefik network、entrypoint 或 certificate resolver 不是預設的 `traefik`、`web`、`websecure`、`letsencrypt`，請修改 `.env` 中對應的 `TRAEFIK_*` 值。
@@ -114,7 +114,7 @@ OTP_ALLOWED_SENDER_PATTERN=
 
 在「發送通道」新增 Webhook：
 
-- **WebServer**：`https://opt.yurishop.xyz/api/v1/smsforwarder`
+- **WebServer**：`https://otp.example.com/api/v1/smsforwarder`
 - **請求方式**：`POST`
 - **Secret**：與伺服器 `SMSFORWARDER_SECRET` 完全相同
 - **webParams**（建議）：
