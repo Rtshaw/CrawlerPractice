@@ -1,0 +1,11 @@
+# The fee worker image may receive code only. Runtime secrets are bind-mounted.
+*
+!requirements.txt
+!fee.py
+!otp_client.py
+!scheduled_run.py
+!docker/
+docker/*
+!docker/Dockerfile.worker
+!docker/worker-entrypoint.sh
+

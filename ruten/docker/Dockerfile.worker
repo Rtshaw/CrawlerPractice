@@ -1,0 +1,34 @@
+FROM python:3.11.10-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HOME=/home/app \
+    DISPLAY=127.0.0.1:99 \
+    TZ=Asia/Taipei
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        chromium \
+        chromium-driver \
+        ca-certificates \
+        procps \
+        tzdata \
+        xvfb \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid app --home-dir /home/app --shell /usr/sbin/nologin app
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN python -m pip install --requirement requirements.txt
+
+COPY --chown=app:app fee.py otp_client.py scheduled_run.py ./
+COPY --chown=app:app docker/worker-entrypoint.sh /usr/local/bin/ruten-worker
+RUN chmod 0555 /usr/local/bin/ruten-worker
+
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/ruten-worker"]
