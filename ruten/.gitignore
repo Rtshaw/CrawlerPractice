@@ -6,6 +6,7 @@ cookies.json
 .fee.lock
 logs/
 docker/runtime/
+runtime/
 
 # Python
 __pycache__/

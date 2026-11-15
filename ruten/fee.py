@@ -659,6 +659,7 @@ class Ruten:
                 raise PaymentFlowError("銀行拒絕 3DS 驗證或付款交易")
             if self._page_has_text(PAYMENT_SUCCESS_TEXT):
                 print("[INFO] 已偵測到付款成功頁")
+                self._unconfirmed = True
                 return
 
             otp_input = self.find_otp_input()
@@ -670,6 +671,7 @@ class Ruten:
                     url_changed = True
                 if url_changed and time.monotonic() - input_missing_since >= 3:
                     print("[INFO] 3DS 頁已完成並導回付款網站")
+                    self._unconfirmed = True
                     return
             else:
                 input_missing_since = None
@@ -718,6 +720,7 @@ class Ruten:
                 break
             if self._page_has_text(PAYMENT_SUCCESS_TEXT):
                 print("[INFO] 此交易未要求 OTP，已由銀行直接授權")
+                self._unconfirmed = True
                 return
             time.sleep(WAIT_POLL_SECONDS)
         if otp_input is None:
@@ -739,11 +742,19 @@ class Ruten:
         self._submit_otp(otp_input, code)
         self._wait_for_3ds_result(challenge_url)
 
+    def _on_fee_center_logged_in(self) -> bool:
+        names = {cookie.get("name") for cookie in self.driver.get_cookies()}
+        return "login" in names and self.driver.current_url.startswith(FEE_CENTER_URL)
+
     def payfee(self) -> str:
         credit_card_button = (By.XPATH, '//button[@id="pay_credit_card"]')
         try:
             self._click(credit_card_button)
         except TimeoutException:
+            if self.driver.find_elements(*credit_card_button):
+                raise
+            if not self._on_fee_center_logged_in():
+                raise PaymentFlowError("未登入或不在費用中心頁，無法確認是否有費用")
             print("[INFO] 目前沒有費用需要繳交")
             return "no_fee"
 
@@ -790,6 +801,8 @@ class Ruten:
         not_before = otp_client.get_server_time()
         self._click((By.XPATH, '//button[@class="rt-button rt-button-submit rt-button-large"]'))
         self.complete_3ds(not_before, client=otp_client)
+        if getattr(self, "_unconfirmed", False):
+            return "paid_unconfirmed"
         return "paid"
 
     def main(self) -> str:
@@ -810,7 +823,8 @@ def run() -> int:
     failed = False
     try:
         ruten = Ruten()
-        ruten.main()
+        outcome = ruten.main()
+        print(f"PAYMENT_OUTCOME={outcome}")
         return 0
     except Exception as exc:
         failed = True

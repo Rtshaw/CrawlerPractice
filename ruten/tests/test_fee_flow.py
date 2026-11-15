@@ -1,7 +1,10 @@
 import configparser
 import unittest
+import fee
 from decimal import Decimal
 from unittest.mock import patch
+
+from selenium.common.exceptions import TimeoutException
 
 from fee import PaymentFlowError, Ruten
 from otp_client import OTPEvent
@@ -402,6 +405,37 @@ class FeeFormFlowTests(unittest.TestCase):
         self.assertLess(
             ruten.events.index("wait_for_payment_form"), ruten.events.index(accept)
         )
+
+    def test_payfee_does_not_report_no_fee_when_present_button_click_times_out(self):
+        ruten = self.make_ruten()
+        ruten._click = lambda locator: (_ for _ in ()).throw(TimeoutException())
+        ruten.driver.find_elements = (
+            lambda by, value: [FakeElement()] if value == '//button[@id="pay_credit_card"]' else []
+        )
+
+        with self.assertRaises(TimeoutException):
+            ruten.payfee()
+
+    def test_no_fee_requires_logged_in_fee_center(self):
+        ruten = self.make_ruten()
+        ruten._click = lambda locator: (_ for _ in ()).throw(TimeoutException())
+        ruten.driver.find_elements = lambda by, value: []
+        driver = type("D", (), {})()
+        driver.find_elements = lambda by, value: []
+        driver.get_cookies = lambda: []
+        driver.current_url = "https://member.ruten.com.tw/login"
+        ruten.driver = driver
+        with self.assertRaises(PaymentFlowError):
+            ruten.payfee()
+        driver.get_cookies = lambda: [{"name": "login"}]
+        driver.current_url = fee.FEE_CENTER_URL
+        self.assertEqual(ruten.payfee(), "no_fee")
+
+    @patch("fee.OTPRelayClient", FakeOTPClient)
+    def test_unconfirmed_success_is_reported(self):
+        ruten = self.make_ruten()
+        ruten.complete_3ds = lambda not_before, client=None: setattr(ruten, "_unconfirmed", True)
+        self.assertEqual(ruten.payfee(), "paid_unconfirmed")
 
 
 if __name__ == "__main__":
