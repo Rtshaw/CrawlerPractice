@@ -166,6 +166,8 @@ $action = New-ScheduledTaskAction `
 
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
     -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 20) `
     -RunOnlyIfNetworkAvailable
@@ -198,6 +200,8 @@ Write-Host "Installed task: $TaskName"
 | `ExecutionTimeLimit 20 分鐘` | 給 15 分鐘 worker hard timeout 留下清理時間 |
 | `RunOnlyIfNetworkAvailable` | 沒有網路時不啟動付款 worker |
 | `StartWhenAvailable` | Windows 錯過時間時可以嘗試稍後啟動 |
+| `AllowStartIfOnBatteries` | 筆電使用電池時仍可在排程時間啟動 |
+| `DontStopIfGoingOnBatteries` | 執行中拔除 AC 電源時不會中止 worker |
 
 ## 6. 5 分鐘補跑的重要限制
 
@@ -304,7 +308,8 @@ Arguments 只能包含 supervisor `.ps1` 路徑，不得出現：
 ```powershell
 $task.Settings |
     Format-List StartWhenAvailable, MultipleInstances, ExecutionTimeLimit,
-        RunOnlyIfNetworkAvailable
+        RunOnlyIfNetworkAvailable, DisallowStartIfOnBatteries,
+        StopIfGoingOnBatteries
 ```
 
 預期：
@@ -314,6 +319,8 @@ StartWhenAvailable      : True
 MultipleInstances       : IgnoreNew
 ExecutionTimeLimit      : PT20M
 RunOnlyIfNetworkAvailable : True
+DisallowStartIfOnBatteries : False
+StopIfGoingOnBatteries    : False
 ```
 
 ### 8.5 查看最近執行結果
@@ -453,3 +460,187 @@ Get-ScheduledTask -TaskName RutenFeeDockerWorker `
   每分鐘喚醒機制，再由 schedule gate 去重。
 - Windows Task 的成功碼不是付款成功證據。
 - 真實排程付款仍需要第一次有人監看的部署驗證。
+
+## 16. 2026-09-01 實作與本機部署結果
+
+本節取代第 2 節與第 15 節中「尚未實作」的狀態描述。實際部署路徑為：
+
+```text
+C:\Users\<USER>\project\CrawlerPractice\ruten
+```
+
+已新增並驗證：
+
+- `docker/Dockerfile.worker` 與 `docker/Dockerfile.worker.dockerignore`
+- `docker/compose.worker.yml` 與 `docker/worker-entrypoint.sh`
+- `scripts/run_fee_container.ps1`
+- `scripts/install_docker_schedule.ps1`
+- `scheduled_run.py` 的 UTC+8 slot gate、五分鐘 grace、atomic claim 與 state lock
+- 不會 import 或呼叫 `fee.py` 的 `-DryRun` 路徑
+
+### 一次性排程測試
+
+`RutenFeeDockerWorker-Test` 排定於 `2026-09-01 00:46:23 +08:00`，實際
+`LastRunTime` 為 `00:46:23`，`LastTaskResult` 為 `0`。Supervisor log 同時包含：
+
+```text
+DRY_RUN_OK
+cleanup_complete
+```
+
+測試後確認固定名稱 `ruten-fee-worker-run` 的容器數為 `0`，並已刪除
+`RutenFeeDockerWorker-Test`；`Get-ScheduledTask` 不再找到它。
+
+### 正式排程
+
+已建立一個 `RutenFeeDockerWorker`，內含五個每日 trigger：
+
+```text
+01:35
+02:00
+02:14
+02:31
+02:40
+```
+
+已核對 `StartWhenAvailable=True`、`DisallowStartIfOnBatteries=False`、
+`StopIfGoingOnBatteries=False`、`MultipleInstances=IgnoreNew`、
+`ExecutionTimeLimit=PT20M`、`RunOnlyIfNetworkAvailable=True`、
+`LogonType=Interactive`、`RunLevel=Limited`。Action 只包含 Windows PowerShell、
+supervisor 絕對路徑及專案絕對路徑，沒有 `-DryRun` 或 secret。建立時顯示的
+下一次執行時間為 `2026-09-01 01:35:00 +08:00`。
+
+### 驗證範圍與剩餘風險
+
+- Python scheduler 與既有 regression tests 已通過。
+- Compose 設定、worker image build、Chromium/chromedriver major alignment、
+  Xvfb/Chromium 離線 smoke test 已通過；smoke marker 為 `BROWSER_SMOKE_OK`。
+- Supervisor 的正常 dry-run、live overlap 與 forced timeout cleanup 已通過。
+- 自動化及一次性 Task 測試都未開啟露天，也未執行真實付款。
+- 五個 trigger 沒有加入每分鐘 repetition；`StartWhenAvailable` 仍不保證主機
+  恢復後一定在五分鐘內喚醒。Supervisor/Python gate 會拒絕超過五分鐘的執行。
+- 第一筆真實排程付款仍須人工監看 log，確認網站、cookies 與銀行 3DS 流程。
+
+### 2026-09-01 電池供電事件與修正
+
+五個排程未付款的原因已由系統事件與 worker log 證實：筆電於
+`2026-09-01 01:08:51 +08:00` 進入電池供電，直到 `08:15:25` 才恢復 AC；
+舊 Task 設定為 `DisallowStartIfOnBatteries=True`，因此 01:35 至 02:40 的五個
+trigger 都沒有準時啟動。恢復 AC 後 Task 才於 08:15 啟動，但 schedule gate
+正確判定已超過五分鐘並記錄 `skipped_not_due`，所以未進入付款流程。
+
+修正後 installer 明確使用 `-AllowStartIfOnBatteries` 與
+`-DontStopIfGoingOnBatteries`，並已重新註冊正式 Task。實機核對結果為
+`DisallowStartIfOnBatteries=False`、`StopIfGoingOnBatteries=False`；五個每日
+trigger 維持 01:35、02:00、02:14、02:31、02:40，下一次執行時間為
+`2026-09-02 01:35:00 +08:00`。
+
+### 2026-09-01 手動付款驗證與 OTP 阻擋
+
+手動驗證先發現 `/home/app` tmpfs 帶有 `noexec`，使
+`undetected-chromedriver` 在瀏覽器啟動前收到 `EACCES`。Compose 已只為
+`/home/app` 加入 `exec`；根檔案系統仍為唯讀、`/tmp` 仍為 `noexec`，UC
+離線 browser smoke 與完整 regression tests 均已通過。
+
+之後確認費用頁確有待繳款，且信用卡付款表單可以開啟。另修正 `payfee()`：
+只有付款按鈕不存在時才回傳 `no_fee`；若按鈕存在但點擊逾時，必須回傳失敗，
+不可把執行錯誤誤報為沒有欠費。
+
+真實付款在取得 OTP relay server time 時收到 HTTP 401，程式在最終付款送出前
+中止並記錄 `payment was not submitted`，因此本次沒有扣款。Docker `.env` 與
+`config.ini` 的 consumer token 都已設定但彼此不同，relay 對兩者均回 401；
+下一次付款前必須先將台灣 worker 的 `OTP_CONSUMER_TOKEN` 與日本 VPS relay
+目前的 token 同步，並確認 `/api/v1/time` 回傳 HTTP 200。
+
+token 同步後已確認 `/api/v1/time` 回傳 HTTP 200，且付款送出前探針可完整完成
+信用卡表單、地址選單與 server-time 檢查。經使用者再次明確授權後執行一次真實
+付款，Chrome 於流程中回報 `tab crashed`；worker exit code 為 1，沒有記錄付款
+成功頁或完成的 3DS 結果。隨後的唯讀費用頁檢查仍找到信用卡付款按鈕，確認
+待繳狀態仍在，本次付款沒有完成。依單次授權未再次重試；下一次真實付款前應先
+處理 production Chrome 的分頁穩定性並完成不送出交易的回歸驗證。
+
+## 17. 2026-09-01 改用 Windows 主機 Python 排程
+
+Docker/Xvfb 內的 Chrome 不會顯示在 Windows 桌面上，而且真實付款驗證曾在
+容器內發生 `tab crashed`。由於相同環境以主機執行 `python fee.py` 能正常開啟
+瀏覽器，正式排程已改為直接使用 Windows 主機 Python；不需要把 `fee.py` 打包
+成 `.exe`。
+
+新增的主機排程元件如下：
+
+- `scripts/run_fee_host.ps1`：保留 UTC+8 檢查、獨立 supervisor log、正確的
+  exit code，以及正式執行時的 `scheduled_run.py --guarded` gate/lock。
+- `scripts/install_host_schedule.ps1`：建立互動登入、Limited 權限及五個每日
+  trigger 的 Windows Task。
+- `scripts/host_browser_smoke.py`：只開啟本機 `data:` 測試頁，不讀取付款設定、
+  cookies 或 OTP，也不會進入露天或送出付款。
+
+一次性可見瀏覽器測試 `RutenFeeHostWorker-Test` 排定於
+`2026-09-01 19:58:08 +08:00`，實際準時啟動並於約 36 秒後結束；結果為：
+
+```text
+LastTaskResult = 0
+HOST_BROWSER_SMOKE_OK
+host_worker_finished mode=browser_smoke exit_code=0
+```
+
+確認成功後已刪除 `RutenFeeHostWorker-Test`。
+
+正式 Task 現為 `RutenFeeHostWorker`，五個每日 trigger 維持：
+
+```text
+01:35
+02:00
+02:14
+02:31
+02:40
+```
+
+Action 使用以下固定 Python：
+
+```text
+C:\Users\<USER>\AppData\Local\Programs\Python\Python39\python.exe
+```
+
+已核對 Task 為 `Ready`、`LogonType=Interactive`、`RunLevel=Limited`、允許電池
+供電、需要網路、錯過時儘快啟動、重疊時忽略新執行；下一次執行時間為
+`2026-09-02 01:35:00 +08:00`。正式 action 沒有 Docker、`-DryRun`、
+`-BrowserSmoke`、OTP URL 或 token。Supervisor 只在正式子程序的環境變數中載入
+`.env` 的 OTP 設定，不將 secret 寫入 Task action 或 supervisor log。
+
+新 Task 完整驗證後，舊的 `RutenFeeDockerWorker` 已移除，避免兩套排程重複付款。
+因為使用 `LogonType=Interactive` 讓 Chrome 能顯示於桌面，五個時段執行時 Windows
+使用者必須保持登入，且電腦不能處於睡眠或關機狀態。首次真實自動付款仍應人工
+監看 `runtime/logs/host-supervisor` 與每日 worker log；本次可見瀏覽器 smoke test
+本身沒有執行付款。
+
+### 2026-09-01 Windows 主機一次性付款成功
+
+為了在正式五個時段以外執行經使用者明確授權的單次付款，主機 supervisor 與
+installer 新增 `-ImmediatePayment`。此模式只略過每日 slot gate，仍使用
+`scheduled_run.py`、`runtime/state/payment.lock`、worker log、OTP 環境變數及互動
+Windows Task；`-ImmediatePayment` 與 `-DryRun`、`-BrowserSmoke` 互斥。正式
+`RutenFeeHostWorker` 不含此旗標，仍維持 guarded 模式。
+
+首次執行發現非 guarded 路徑忽略 `--state-dir`，導致 log 與 lock 落在專案根目錄。
+已以整合測試重現後修正，Immediate 模式現在和正式排程共用 `runtime` 下的 log 與
+付款鎖。付款前另發現 `card_type=JCB` 但只有 `[MASTER]` 區塊；該次在 Chrome 啟動
+前即安全失敗，沒有送出付款。使用者修正卡別設定後才再次執行。
+
+`RutenFeeHostWorker-Manual` 於 `2026-09-01 20:28:00 +08:00` 啟動。實際 worker
+log 為 `runtime/logs/20260901/202801.log`，確認流程依序完成：
+
+```text
+已驗證玉山 3DS 來源、金額與網頁識別碼候選值
+OTP relay 已收到包含交易關聯資料的簡訊轉發
+已送出一次與交易相符的 OTP
+已確認信用卡授權與繳費成功
+繳費流程結束: paid
+scheduled payment exited: 0
+```
+
+Supervisor 同時記錄 `host_worker_finished mode=immediate_payment exit_code=0`，Windows
+Task 的 `LastTaskResult` 為 `0`。成功後已刪除一次性
+`RutenFeeHostWorker-Manual`；正式 `RutenFeeHostWorker` 仍為 `Ready`，五個時間維持
+01:35、02:00、02:14、02:31、02:40，下一次執行為
+`2026-09-02 01:35:00 +08:00`。
