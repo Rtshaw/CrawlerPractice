@@ -36,6 +36,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
 
+from chrome_window import ensure_live_window
 from otp_client import OTPEvent, OTPRelayClient
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -256,6 +257,8 @@ class Ruten:
         major = self._detect_chrome_major_version()
         print(f"[INFO] 啟動 Chrome 中... headless={self.headless}, background={self.background}")
         driver = uc.Chrome(options=chrome_options, version_main=major) if major else uc.Chrome(options=chrome_options)
+        # 啟動競態：初始視窗可能已被 Chrome 換掉，須先恢復有效 handle 才能操作視窗
+        ensure_live_window(driver)
         if self.background and not self.headless:
             try:
                 driver.minimize_window()
