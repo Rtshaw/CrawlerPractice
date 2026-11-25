@@ -36,7 +36,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
 
-from chrome_window import ensure_live_window
+from chrome_window import ensure_live_window, retry_on_stale_window
 from otp_client import OTPEvent, OTPRelayClient
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -261,7 +261,8 @@ class Ruten:
         ensure_live_window(driver)
         if self.background and not self.headless:
             try:
-                driver.minimize_window()
+                # minimize 也可能遇到 target 被替換，失效時恢復後重試
+                retry_on_stale_window(driver, driver.minimize_window)
             except Exception as exc:
                 print(f"[WARN] 無法最小化 Chrome 視窗: {exc}")
         return driver
@@ -809,7 +810,7 @@ class Ruten:
         return "paid"
 
     def main(self) -> str:
-        self.driver.set_window_size(1200, 600)
+        retry_on_stale_window(self.driver, lambda: self.driver.set_window_size(1200, 600))
         print(f"[INFO] config 路徑: {self.config_path}")
         print(f"[INFO] cookies 路徑: {self.cookies_path}")
         self._restore_session_from_cookies()

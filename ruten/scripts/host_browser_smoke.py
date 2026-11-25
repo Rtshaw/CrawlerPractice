@@ -14,7 +14,7 @@ from typing import Optional
 import undetected_chromedriver as uc
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from chrome_window import ensure_live_window  # noqa: E402
+from chrome_window import ensure_live_window, retry_on_stale_window  # noqa: E402
 
 
 def detect_chrome_major() -> Optional[int]:
@@ -49,11 +49,15 @@ def run_once(major: Optional[int], duration: int) -> None:
     driver = uc.Chrome(options=options, version_main=major) if major else uc.Chrome(options=options)
     try:
         ensure_live_window(driver)
-        driver.minimize_window()
-        driver.set_window_size(1200, 600)
-        driver.get(
-            "data:text/html,<title>Ruten host browser smoke</title>"
-            "<h1>Ruten host browser smoke: no payment</h1>"
+        # 每個視窗操作都可能撞上 target 被替換，失效時恢復後重試
+        retry_on_stale_window(driver, driver.minimize_window)
+        retry_on_stale_window(driver, lambda: driver.set_window_size(1200, 600))
+        retry_on_stale_window(
+            driver,
+            lambda: driver.get(
+                "data:text/html,<title>Ruten host browser smoke</title>"
+                "<h1>Ruten host browser smoke: no payment</h1>"
+            ),
         )
         if driver.title != "Ruten host browser smoke":
             raise RuntimeError("browser smoke title mismatch")
