@@ -1,6 +1,8 @@
 param(
     [string]$ProjectPath = (Split-Path -Parent $PSScriptRoot),
-    [string]$PythonPath = (Get-Command python -ErrorAction Stop).Source,
+    [string]$PythonPath = "",
+    # 未指定 PythonPath 時，從此排程讀取直譯器（可注入以利測試）
+    [string]$WorkerTaskName = "RutenFeeHostWorker",
     [string]$EnvFile = "",
     [string]$RuntimePath = "",
     [switch]$DryRun,
@@ -18,6 +20,16 @@ if ([DateTimeOffset]::Now.Offset -ne $expectedOffset) {
 }
 if (@($DryRun, $BrowserSmoke, $ImmediatePayment, $Manual).Where({ $_ }).Count -gt 1) {
     throw "DryRun, BrowserSmoke, ImmediatePayment, and Manual are mutually exclusive."
+}
+
+# 手動執行未帶 -PythonPath 時，必須與排程使用同一個直譯器，不可退回 PATH 上的 python
+if (-not $PythonPath) {
+    $workerTask = Get-ScheduledTask -TaskName $WorkerTaskName -ErrorAction SilentlyContinue
+    $taskArguments = if ($workerTask) { [string]$workerTask.Actions[0].Arguments } else { "" }
+    if ($taskArguments -notmatch '-PythonPath\s+"([^"]+)"') {
+        throw "Cannot determine PythonPath: pass -PythonPath or install scheduled task '$WorkerTaskName'."
+    }
+    $PythonPath = $Matches[1]
 }
 
 $resolvedProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
@@ -110,6 +122,25 @@ if ($BrowserSmoke) {
     }
 }
 
+# 非 BrowserSmoke 模式需要 ZoneInfo('Asia/Taipei')；缺 tzdata 時提前明確失敗，避免跑到付款流程才炸
+if (-not $BrowserSmoke) {
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $tzOutput = @(& $resolvedPythonPath -c "from zoneinfo import ZoneInfo; ZoneInfo('Asia/Taipei')" 2>&1 | ForEach-Object { $_.ToString() })
+        $tzExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($tzExit -ne 0) {
+        Write-Status "tz_self_check_failed python=$resolvedPythonPath exit_code=$tzExit (interpreter lacks tzdata for Asia/Taipei)"
+        foreach ($line in $tzOutput) {
+            Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
+        }
+        exit 1
+    }
+}
+
 $exitCode = 1
 Write-Status "host_worker_started mode=$mode"
 $previousPreference = $ErrorActionPreference
@@ -124,7 +155,8 @@ foreach ($line in $output) {
     Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
     Write-Host $line
 }
-if ($BrowserSmoke -and ($output -notmatch "HOST_BROWSER_SMOKE_OK")) {
+# 輸出含多行（逐次 ITERATION 訊息），須判斷「沒有任何一行」符合標記
+if ($BrowserSmoke -and -not ($output -match "HOST_BROWSER_SMOKE_OK")) {
     $exitCode = 1
 }
 Write-Status "host_worker_finished mode=$mode exit_code=$exitCode"
