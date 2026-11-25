@@ -36,7 +36,6 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
 
-from chrome_window import ensure_live_window, retry_on_stale_window
 from otp_client import OTPEvent, OTPRelayClient
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -257,12 +256,9 @@ class Ruten:
         major = self._detect_chrome_major_version()
         print(f"[INFO] 啟動 Chrome 中... headless={self.headless}, background={self.background}")
         driver = uc.Chrome(options=chrome_options, version_main=major) if major else uc.Chrome(options=chrome_options)
-        # 啟動競態：初始視窗可能已被 Chrome 換掉，須先恢復有效 handle 才能操作視窗
-        ensure_live_window(driver)
         if self.background and not self.headless:
             try:
-                # minimize 也可能遇到 target 被替換，失效時恢復後重試
-                retry_on_stale_window(driver, driver.minimize_window)
+                driver.minimize_window()
             except Exception as exc:
                 print(f"[WARN] 無法最小化 Chrome 視窗: {exc}")
         return driver
@@ -810,7 +806,7 @@ class Ruten:
         return "paid"
 
     def main(self) -> str:
-        retry_on_stale_window(self.driver, lambda: self.driver.set_window_size(1200, 600))
+        self.driver.set_window_size(1200, 600)
         print(f"[INFO] config 路徑: {self.config_path}")
         print(f"[INFO] cookies 路徑: {self.cookies_path}")
         self._restore_session_from_cookies()

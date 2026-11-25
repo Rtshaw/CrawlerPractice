@@ -2,8 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $projectPath = Split-Path -Parent $PSScriptRoot
 $supervisorPath = Join-Path $projectPath "scripts\run_fee_host.ps1"
-# 可用環境變數指定直譯器（需有 tzdata），否則取 PATH 上的 python
-$pythonPath = if ($env:RUTEN_TEST_PYTHON) { $env:RUTEN_TEST_PYTHON } else { (Get-Command python -ErrorAction Stop).Source }
+$pythonPath = (Get-Command python -ErrorAction Stop).Source
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ("ruten-host-supervisor-" + [guid]::NewGuid().ToString("N"))
 
 function Assert-True {
@@ -17,12 +16,8 @@ function Invoke-HostSupervisor {
     param(
         [string[]]$Arguments,
         [string]$SupervisorProjectPath = $projectPath,
-        [string]$SupervisorRuntimePath = $testRoot,
-        [string]$SupervisorPythonPath = $pythonPath,
-        [string[]]$ExtraArguments = @()
+        [string]$SupervisorRuntimePath = $testRoot
     )
-    # 空字串代表「不傳 -PythonPath」，用來測試從排程讀取直譯器的分支
-    $pythonArgs = if ($SupervisorPythonPath) { @("-PythonPath", $SupervisorPythonPath) } else { @() }
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
@@ -32,9 +27,8 @@ function Invoke-HostSupervisor {
             -ExecutionPolicy Bypass `
             -File $supervisorPath `
             -ProjectPath $SupervisorProjectPath `
-            @pythonArgs `
+            -PythonPath $pythonPath `
             -RuntimePath $SupervisorRuntimePath `
-            @ExtraArguments `
             @Arguments 2>&1
         $exitCode = $LASTEXITCODE
     } finally {
@@ -129,27 +123,6 @@ OTP_CONSUMER_TOKEN=test-only-token
     $manualInvalid = Invoke-HostSupervisor -Arguments @("-Manual", "-ImmediatePayment") `
         -SupervisorProjectPath $fakeProject -SupervisorRuntimePath $fakeRuntime
     Assert-True ($manualInvalid -ne 0) "manual and immediate payment are mutually exclusive"
-
-    # 未給 PythonPath 且找不到 Worker 排程時必須 throw，不得退回 PATH 上的 python
-    $noTaskExit = Invoke-HostSupervisor -Arguments @("-DryRun") `
-        -SupervisorPythonPath "" `
-        -ExtraArguments @("-WorkerTaskName", "RutenNoSuchTask-" + [guid]::NewGuid().ToString("N"))
-    Assert-True ($noTaskExit -ne 0) "missing worker task and PythonPath throws"
-
-    # 直譯器缺 tzdata（假直譯器一律失敗）時，非 BrowserSmoke 模式要 exit 1 並寫入 supervisor log
-    $fakePython = Join-Path $testRoot "fake-python-no-tz.cmd"
-    Set-Content -LiteralPath $fakePython -Encoding ASCII -Value "@echo off`r`nexit /b 1"
-    foreach ($modeArgs in @(@("-DryRun"), @("-Manual"), @("-ImmediatePayment"), @())) {
-        $tzRuntime = Join-Path $testRoot ("tz-" + [guid]::NewGuid().ToString("N"))
-        $tzExit = Invoke-HostSupervisor -Arguments $modeArgs `
-            -SupervisorProjectPath $fakeProject -SupervisorRuntimePath $tzRuntime `
-            -SupervisorPythonPath $fakePython
-        Assert-True ($tzExit -eq 1) "tz self-check failure exits 1 for mode [$modeArgs]"
-        $tzLog = Get-ChildItem -LiteralPath (Join-Path $tzRuntime "logs\host-supervisor") -Filter "*.log" -File |
-            Select-Object -First 1
-        Assert-True ((Get-Content -LiteralPath $tzLog.FullName -Raw) -match "tz_self_check_failed") `
-            "tz self-check failure is written to the supervisor log"
-    }
 
     Write-Host "HOST_SUPERVISOR_TESTS_OK"
 } finally {

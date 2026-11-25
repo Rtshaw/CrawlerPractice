@@ -438,48 +438,5 @@ class FeeFormFlowTests(unittest.TestCase):
         self.assertEqual(ruten.payfee(), "paid_unconfirmed")
 
 
-class BuildDriverWindowTests(unittest.TestCase):
-    def test_build_driver_recovers_stale_handle_before_minimize(self):
-        """_build_driver 必須在 minimize_window 之前恢復失效的視窗 handle。"""
-        events = []
-
-        class FakeChrome:
-            def minimize_window(self):
-                events.append("minimize")
-
-        driver = FakeChrome()
-        ruten = Ruten.__new__(Ruten)
-        ruten.headless = False
-        ruten.background = True
-        with patch("fee.uc.Chrome", return_value=driver), patch.object(
-            Ruten, "_detect_chrome_major_version", return_value=None
-        ), patch("fee.ensure_live_window", side_effect=lambda d: events.append("ensure")):
-            self.assertIs(ruten._build_driver(), driver)
-        self.assertEqual(events, ["ensure", "minimize"])
-
-    def test_build_driver_retries_minimize_on_stale_window(self):
-        """minimize 遇到 no such window 時，要恢復視窗後重試。"""
-        from selenium.common.exceptions import NoSuchWindowException
-
-        events = []
-
-        class FakeChrome:
-            def minimize_window(self):
-                events.append("minimize")
-                if events.count("minimize") == 1:
-                    raise NoSuchWindowException("gone")
-
-        ruten = Ruten.__new__(Ruten)
-        ruten.headless = False
-        ruten.background = True
-        with patch("fee.uc.Chrome", return_value=FakeChrome()), patch.object(
-            Ruten, "_detect_chrome_major_version", return_value=None
-        ), patch("fee.ensure_live_window"), patch(
-            "chrome_window.ensure_live_window", side_effect=lambda d: events.append("recover")
-        ):
-            ruten._build_driver()
-        self.assertEqual(events, ["minimize", "recover", "minimize"])
-
-
 if __name__ == "__main__":
     unittest.main()
